@@ -142,10 +142,14 @@ class CaricoMagazzinoSerializer(serializers.Serializer):
 class OperazioneImbottigliamentoSerializer(serializers.ModelSerializer):
     tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
     stato_display = serializers.CharField(source='get_stato_display', read_only=True)
-    tipologia_vino_nome = serializers.CharField(source='tipologia_vino.__str__', read_only=True)
-    tipologia_vino_destinazione_nome = serializers.CharField(
-        source='tipologia_vino_destinazione.__str__', read_only=True, allow_null=True
-    )
+    tipologia_vino_nome = serializers.SerializerMethodField()
+    tipologia_vino_destinazione_nome = serializers.SerializerMethodField()
+
+    def get_tipologia_vino_nome(self, obj):
+        return str(obj.tipologia_vino) if obj.tipologia_vino else None
+
+    def get_tipologia_vino_destinazione_nome(self, obj):
+        return str(obj.tipologia_vino_destinazione) if obj.tipologia_vino_destinazione else None
 
     class Meta:
         model = OperazioneImbottigliamento

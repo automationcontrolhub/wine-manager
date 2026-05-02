@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Package, Tag, CheckCircle, AlertTriangle, Wine, Trash2 } from 'lucide-react';
+import { Package, Tag, CheckCircle, AlertTriangle, Wine, Trash2, History, Undo2 } from 'lucide-react';
 import Modal from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import {
@@ -295,7 +295,6 @@ export default function Imbottigliamento() {
                   <th className="table-header">Etichetta</th>
                   <th className="table-header">Capsula</th>
                   <th className="table-header">Data</th>
-                  <th className="table-header w-16"></th>
                 </tr>
               </thead>
               <tbody>
@@ -319,22 +318,6 @@ export default function Imbottigliamento() {
                     <td className="table-cell text-bark-500 text-xs">
                       {new Date(l.data_creazione).toLocaleString('it-IT')}
                     </td>
-                    <td className="table-cell">
-                      {(() => {
-                        const op = allOperazioni.find(o =>
-                          o.stato === 'ATTIVA' &&
-                          o.tipologia_vino === l.tipologia_vino &&
-                          ((o.tipo === 'CREA_CON_ETICHETTA') || (o.tipo === 'ASSOCIA_ETICHETTA'))
-                        );
-                        return op ? (
-                          <button onClick={() => handleAnnulla(op)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
-                            title="Annulla operazione">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        ) : null;
-                      })()}
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -348,7 +331,7 @@ export default function Imbottigliamento() {
         <div className="card">
           <h2 className="section-title flex items-center gap-2">
             <Package className="w-5 h-5 text-amber-500" />
-            Lotti senza etichetta (dettaglio)
+            Bottiglie senza etichetta (dettaglio)
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -358,7 +341,6 @@ export default function Imbottigliamento() {
                   <th className="table-header">Quantità</th>
                   <th className="table-header">Capsula</th>
                   <th className="table-header">Data</th>
-                  <th className="table-header w-16"></th>
                 </tr>
               </thead>
               <tbody>
@@ -379,21 +361,90 @@ export default function Imbottigliamento() {
                     <td className="table-cell text-bark-500 text-xs">
                       {new Date(l.data_creazione).toLocaleString('it-IT')}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Storico Operazioni */}
+      {allOperazioni.length > 0 && (
+        <div className="card">
+          <h2 className="section-title flex items-center gap-2">
+            <History className="w-5 h-5 text-bark-500" />
+            Storico Operazioni
+          </h2>
+          <p className="text-sm text-bark-500 mb-3">
+            Le operazioni attive possono essere annullate. L'annullamento ripristina materiali e vino.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-bark-100">
+                  <th className="table-header">Tipo</th>
+                  <th className="table-header">Tipologia</th>
+                  <th className="table-header">Quantità</th>
+                  <th className="table-header">Capsula</th>
+                  <th className="table-header">Stato</th>
+                  <th className="table-header">Data</th>
+                  <th className="table-header w-16"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {allOperazioni.slice(0, 50).map(op => (
+                  <tr key={op.id} className={`border-b border-bark-50 hover:bg-bark-50/50 ${
+                    op.stato === 'ANNULLATA' ? 'opacity-50' : ''
+                  }`}>
                     <td className="table-cell">
-                      {(() => {
-                        const op = allOperazioni.find(o =>
-                          o.stato === 'ATTIVA' &&
-                          o.tipologia_vino === l.tipologia_vino &&
-                          o.tipo === 'CREA_SENZA_ETICHETTA'
-                        );
-                        return op ? (
-                          <button onClick={() => handleAnnulla(op)}
-                            className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
-                            title="Annulla operazione">
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        ) : null;
-                      })()}
+                      {op.tipo === 'CREA_SENZA_ETICHETTA' ? (
+                        <span className="badge-amber">Senza etichetta</span>
+                      ) : op.tipo === 'CREA_CON_ETICHETTA' ? (
+                        <span className="badge-olive">Con etichetta</span>
+                      ) : (
+                        <span className="badge-wine">Associa etichetta</span>
+                      )}
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-bark-900 text-sm">
+                          {op.tipologia_vino_nome}
+                        </span>
+                        {op.tipologia_vino_destinazione_nome && (
+                          <span className="text-xs text-bark-500">
+                            → {op.tipologia_vino_destinazione_nome}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="table-cell font-semibold">{op.quantita.toLocaleString('it-IT')}</td>
+                    <td className="table-cell">
+                      {op.con_capsula
+                        ? <span className="badge-olive">Sì</span>
+                        : <span className="badge-amber">No</span>
+                      }
+                    </td>
+                    <td className="table-cell">
+                      {op.stato === 'ATTIVA' ? (
+                        <span className="badge-olive">Attiva</span>
+                      ) : (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">Annullata</span>
+                      )}
+                    </td>
+                    <td className="table-cell text-bark-500 text-xs">
+                      {new Date(op.data).toLocaleString('it-IT')}
+                    </td>
+                    <td className="table-cell">
+                      {op.stato === 'ATTIVA' && (
+                        <button
+                          onClick={() => handleAnnulla(op)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
+                          title="Annulla operazione"
+                        >
+                          <Undo2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
