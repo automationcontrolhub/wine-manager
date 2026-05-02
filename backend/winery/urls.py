@@ -13,6 +13,7 @@ router.register(r'famiglie', views.FamigliaVinoViewSet)
 router.register(r'tipologie-vino', views.TipologiaVinoViewSet)
 router.register(r'lotti', views.LottoBottiglieViewSet)
 router.register(r'movimenti', views.MovimentoMagazzinoViewSet)
+router.register(r'operazioni', views.OperazioneImbottigliamentoViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -23,4 +24,5 @@ urlpatterns = [
     path('crea-con-etichetta/', views.crea_bottiglie_con_etichetta),
     path('associa-etichetta/', views.associa_etichetta),
     path('bottiglie-senza-etichetta/', views.bottiglie_senza_etichetta),
+    path('operazioni/<int:pk>/annulla/', views.annulla_operazione),
 ]

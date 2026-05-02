@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
     TipoCapsula, TipoCestello, FamigliaVino, TipologiaVino,
-    LottoBottiglie, MovimentoMagazzino,
+    LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
 )
 
 @admin.register(TipoCartone)
@@ -47,3 +47,8 @@ class LottoBottiglieAdmin(admin.ModelAdmin):
 class MovimentoMagazzinoAdmin(admin.ModelAdmin):
     list_display = ['tipo', 'categoria', 'quantita', 'data', 'descrizione']
     list_filter = ['tipo', 'categoria']
+
+@admin.register(OperazioneImbottigliamento)
+class OperazioneImbottigliamentoAdmin(admin.ModelAdmin):
+    list_display = ['tipo', 'tipologia_vino', 'quantita', 'stato', 'data']
+    list_filter = ['tipo', 'stato']

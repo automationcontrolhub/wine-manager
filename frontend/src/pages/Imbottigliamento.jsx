@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Package, Tag, CheckCircle, AlertTriangle, Wine } from 'lucide-react';
+import { Package, Tag, CheckCircle, AlertTriangle, Wine, Trash2 } from 'lucide-react';
 import Modal from '../components/Modal';
+import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipologieVino, creaSenzaEtichetta, creaConEtichetta,
   associaEtichetta, getBottiglieSenzaEtichetta, lotti as lottiApi,
+  operazioni as operazioniApi,
 } from '../api/client';
 
 export default function Imbottigliamento() {
+  const confirm = useConfirm();
   const [tipologie, setTipologie] = useState([]);
   const [senzaEtichetta, setSenzaEtichetta] = useState([]);
   const [allLotti, setAllLotti] = useState([]);
+  const [allOperazioni, setAllOperazioni] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [showSenza, setShowSenza] = useState(false);
@@ -31,14 +35,16 @@ export default function Imbottigliamento() {
   const loadAll = async () => {
     setLoading(true);
     try {
-      const [tip, se, lo] = await Promise.all([
+      const [tip, se, lo, op] = await Promise.all([
         tipologieVino.list(),
         getBottiglieSenzaEtichetta(),
         lottiApi.list(),
+        operazioniApi.list(),
       ]);
       setTipologie(Array.isArray(tip) ? tip : tip.results || []);
       setSenzaEtichetta(Array.isArray(se) ? se : []);
       setAllLotti(Array.isArray(lo) ? lo : lo.results || []);
+      setAllOperazioni(Array.isArray(op) ? op : op.results || []);
     } catch (e) {
       toast.error('Errore nel caricamento');
     }
@@ -54,7 +60,9 @@ export default function Imbottigliamento() {
     const q = Number(qty);
     const cap = tip.tipo_bottiglia_capacita ? parseFloat(tip.tipo_bottiglia_capacita) : 0.75;
     const litri = q * cap;
-    const cartCap = tipologie.find(t => t.id === Number(tipId));
+    // Capacità reale del cartone associato a questa tipologia
+    const cartoneCap = tip.tipo_cartone_capacita || 1;
+    const cartoniNecessari = Math.ceil(q / cartoneCap);
 
     return (
       <div className="bg-bark-50 rounded-xl p-4 mt-4 space-y-2 animate-fade-in">
@@ -85,8 +93,10 @@ export default function Imbottigliamento() {
             </div>
           )}
           <div className="flex justify-between p-2 rounded-lg bg-white">
-            <span className="text-bark-600">Cartoni ({tip.tipo_cartone_nome})</span>
-            <span className="font-semibold">{Math.ceil(q / 6)}</span>
+            <span className="text-bark-600">
+              Cartoni ({tip.tipo_cartone_nome}, {cartoneCap}/cad)
+            </span>
+            <span className="font-semibold">{cartoniNecessari}</span>
           </div>
           {tip.famiglia_is_spumante && tip.tipo_cestello_nome && (
             <div className="flex justify-between p-2 rounded-lg bg-white">
@@ -178,6 +188,35 @@ export default function Imbottigliamento() {
   );
   const maxDisponibile = selectedAssociaTip.reduce((sum, s) => sum + s.totale, 0);
 
+  const handleAnnulla = async (op) => {
+    const tipoLabel = {
+      'CREA_SENZA_ETICHETTA': 'creazione senza etichetta',
+      'CREA_CON_ETICHETTA': 'creazione con etichetta',
+      'ASSOCIA_ETICHETTA': 'associazione etichetta',
+    }[op.tipo] || 'operazione';
+
+    const ok = await confirm({
+      title: 'Annullare l\'operazione?',
+      message: `Stai per annullare la ${tipoLabel} di ${op.quantita} bottiglie (${op.tipologia_vino_nome}).\n\nVerranno ripristinati i materiali in magazzino e il vino nei silos. Le bottiglie create verranno rimosse dai lotti.`,
+      confirmLabel: 'Annulla operazione',
+      cancelLabel: 'Mantieni',
+      variant: 'warning',
+    });
+    if (!ok) return;
+    try {
+      await operazioniApi.annulla(op.id);
+      toast.success('Operazione annullata');
+      loadAll();
+    } catch (e) {
+      const errors = e.response?.data?.errors;
+      if (errors) {
+        errors.forEach(err => toast.error(err));
+      } else {
+        toast.error(e.response?.data?.error || 'Errore nell\'annullamento');
+      }
+    }
+  };
+
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-8 h-8 border-3 border-wine-300 border-t-wine-700 rounded-full animate-spin" />
@@ -256,6 +295,7 @@ export default function Imbottigliamento() {
                   <th className="table-header">Etichetta</th>
                   <th className="table-header">Capsula</th>
                   <th className="table-header">Data</th>
+                  <th className="table-header w-16"></th>
                 </tr>
               </thead>
               <tbody>
@@ -278,6 +318,22 @@ export default function Imbottigliamento() {
                     </td>
                     <td className="table-cell text-bark-500 text-xs">
                       {new Date(l.data_creazione).toLocaleString('it-IT')}
+                    </td>
+                    <td className="table-cell">
+                      {(() => {
+                        const op = allOperazioni.find(o =>
+                          o.stato === 'ATTIVA' &&
+                          o.tipologia_vino === l.tipologia_vino &&
+                          ((o.tipo === 'CREA_CON_ETICHETTA') || (o.tipo === 'ASSOCIA_ETICHETTA'))
+                        );
+                        return op ? (
+                          <button onClick={() => handleAnnulla(op)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
+                            title="Annulla operazione">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : null;
+                      })()}
                     </td>
                   </tr>
                 ))}
@@ -302,6 +358,7 @@ export default function Imbottigliamento() {
                   <th className="table-header">Quantità</th>
                   <th className="table-header">Capsula</th>
                   <th className="table-header">Data</th>
+                  <th className="table-header w-16"></th>
                 </tr>
               </thead>
               <tbody>
@@ -321,6 +378,22 @@ export default function Imbottigliamento() {
                     </td>
                     <td className="table-cell text-bark-500 text-xs">
                       {new Date(l.data_creazione).toLocaleString('it-IT')}
+                    </td>
+                    <td className="table-cell">
+                      {(() => {
+                        const op = allOperazioni.find(o =>
+                          o.stato === 'ATTIVA' &&
+                          o.tipologia_vino === l.tipologia_vino &&
+                          o.tipo === 'CREA_SENZA_ETICHETTA'
+                        );
+                        return op ? (
+                          <button onClick={() => handleAnnulla(op)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
+                            title="Annulla operazione">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        ) : null;
+                      })()}
                     </td>
                   </tr>
                 ))}

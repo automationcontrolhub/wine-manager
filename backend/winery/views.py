@@ -1,6 +1,7 @@
 from decimal import Decimal
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, action
 from rest_framework.response import Response
@@ -8,13 +9,14 @@ from rest_framework.response import Response
 from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
     TipoCapsula, TipoCestello, FamigliaVino, TipologiaVino,
-    LottoBottiglie, MovimentoMagazzino,
+    LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
 )
 from .serializers import (
     TipoCartoneSerializer, TipoTappoSerializer, TipoBottigliaSerializer,
     TipoEtichettaSerializer, TipoCapsulaSerializer, TipoCestelloSerializer,
     FamigliaVinoSerializer, TipologiaVinoSerializer,
     LottoBottiglieSerializer, MovimentoMagazzinoSerializer,
+    OperazioneImbottigliamentoSerializer,
     CreaBottiglieSenzaEtichettaSerializer, CreaBottiglieConEtichettaSerializer,
     AssociaEtichettaSerializer, AggiuntaVinoSerializer,
     CaricoMagazzinoSerializer,
@@ -363,6 +365,16 @@ def crea_bottiglie_senza_etichetta(request):
                 ha_capsula=con_capsula,
             )
 
+        # Salva snapshot operazione per annullamento
+        OperazioneImbottigliamento.objects.create(
+            tipo=OperazioneImbottigliamento.TipoOperazione.CREA_SENZA_ETICHETTA,
+            tipologia_vino=tipologia,
+            quantita=quantita,
+            con_etichetta=False,
+            con_capsula=con_capsula,
+            dettagli={'lotto_id': lotto.id},
+        )
+
     return Response(LottoBottiglieSerializer(lotto).data, status=201)
 
 
@@ -411,6 +423,16 @@ def crea_bottiglie_con_etichetta(request):
                 ha_etichetta=True,
                 ha_capsula=con_capsula,
             )
+
+        # Salva snapshot operazione per annullamento
+        OperazioneImbottigliamento.objects.create(
+            tipo=OperazioneImbottigliamento.TipoOperazione.CREA_CON_ETICHETTA,
+            tipologia_vino=tipologia,
+            quantita=quantita,
+            con_etichetta=True,
+            con_capsula=con_capsula,
+            dettagli={'lotto_id': lotto.id},
+        )
 
     return Response(LottoBottiglieSerializer(lotto).data, status=201)
 
@@ -565,6 +587,41 @@ def associa_etichetta(request):
                 ha_capsula=con_capsula,
             )
 
+        # Salva snapshot operazione per annullamento
+        # Memorizziamo i dettagli dei lotti origine consumati per poter ripristinare
+        lotti_consumati_dettagli = []
+        rimanenti = quantita
+        # Riprendiamo l'ordinamento corretto dei lotti origine
+        if con_capsula:
+            lotti_check = LottoBottiglie.objects.filter(
+                tipologia_vino=tipologia_origine,
+                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                ha_etichetta=False,
+            ).order_by('ha_capsula', 'data_creazione')
+        else:
+            lotti_check = LottoBottiglie.objects.filter(
+                tipologia_vino=tipologia_origine,
+                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                ha_etichetta=False,
+            ).order_by('-ha_capsula', 'data_creazione')
+
+        # Nota: a questo punto i lotti sono già stati scalati, quindi salviamo
+        # solo i totali per ricostruire in caso di annullamento
+        OperazioneImbottigliamento.objects.create(
+            tipo=OperazioneImbottigliamento.TipoOperazione.ASSOCIA_ETICHETTA,
+            tipologia_vino=tipologia_origine,
+            tipologia_vino_destinazione=tipologia_dest,
+            quantita=quantita,
+            con_etichetta=True,
+            con_capsula=con_capsula,
+            dettagli={
+                'lotto_dest_id': lotto_completo.id,
+                'capsule_aggiunte': capsule_da_aggiungere,
+                'tipologia_origine_id': tipologia_origine.id,
+                'tipologia_dest_id': tipologia_dest.id,
+            },
+        )
+
     return Response(LottoBottiglieSerializer(lotto_completo).data, status=200)
 
 
@@ -634,3 +691,328 @@ def bottiglie_senza_etichetta(request):
         .order_by('tipologia_vino__famiglia__nome', 'tipologia_vino__nome')
     )
     return Response(list(lotti))
+
+
+# ─── Operazioni: lista e annullamento ─────────────────────────────────────
+
+class OperazioneImbottigliamentoViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = OperazioneImbottigliamento.objects.select_related(
+        'tipologia_vino', 'tipologia_vino__famiglia',
+        'tipologia_vino_destinazione', 'tipologia_vino_destinazione__famiglia',
+    ).all()
+    serializer_class = OperazioneImbottigliamentoSerializer
+    filterset_fields = ['stato', 'tipo']
+
+
+@api_view(['POST'])
+def annulla_operazione(request, pk):
+    """
+    Annulla una operazione di imbottigliamento ripristinando lo stato precedente:
+    - Materiali tornano in magazzino
+    - Vino torna nel silos (per crea_*)
+    - Lotti bottiglie tornano allo stato precedente
+    
+    NB: per ASSOCIA_ETICHETTA non si può ricostruire l'esatta distribuzione
+    dei lotti origine (con/senza capsula), quindi si crea un lotto unificato
+    con lo stato corrispondente al flag con_capsula dell'operazione.
+    """
+    try:
+        op = OperazioneImbottigliamento.objects.select_related(
+            'tipologia_vino', 'tipologia_vino__famiglia',
+            'tipologia_vino__tipo_cartone', 'tipologia_vino__tipo_tappo',
+            'tipologia_vino__tipo_bottiglia', 'tipologia_vino__tipo_etichetta',
+            'tipologia_vino__tipo_capsula', 'tipologia_vino__tipo_cestello',
+            'tipologia_vino_destinazione', 'tipologia_vino_destinazione__famiglia',
+            'tipologia_vino_destinazione__tipo_etichetta',
+            'tipologia_vino_destinazione__tipo_capsula',
+        ).get(pk=pk)
+    except OperazioneImbottigliamento.DoesNotExist:
+        return Response({'error': 'Operazione non trovata'}, status=404)
+
+    if op.stato == OperazioneImbottigliamento.Stato.ANNULLATA:
+        return Response({'error': 'Operazione già annullata'}, status=400)
+
+    with transaction.atomic():
+        if op.tipo == OperazioneImbottigliamento.TipoOperazione.CREA_SENZA_ETICHETTA:
+            _annulla_crea_senza_etichetta(op)
+        elif op.tipo == OperazioneImbottigliamento.TipoOperazione.CREA_CON_ETICHETTA:
+            _annulla_crea_con_etichetta(op)
+        elif op.tipo == OperazioneImbottigliamento.TipoOperazione.ASSOCIA_ETICHETTA:
+            errore = _annulla_associa_etichetta(op)
+            if errore:
+                # Solleva eccezione per fare rollback
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'errors': [errore]})
+
+        op.stato = OperazioneImbottigliamento.Stato.ANNULLATA
+        op.data_annullamento = timezone.now()
+        op.save(update_fields=['stato', 'data_annullamento'])
+
+        MovimentoMagazzino.objects.create(
+            tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+            categoria=MovimentoMagazzino.Categoria.BOTTIGLIA,
+            quantita=op.quantita,
+            descrizione=f"Annullata operazione: {op.get_tipo_display()} × {op.quantita} ({op.tipologia_vino})",
+        )
+
+    return Response(OperazioneImbottigliamentoSerializer(op).data)
+
+
+def _annulla_crea_senza_etichetta(op):
+    """Annulla creazione senza etichetta: ripristina materiali e rimuove dal lotto."""
+    tipologia = op.tipologia_vino
+    quantita = op.quantita
+    con_capsula = op.con_capsula
+
+    # Ripristina materiali in magazzino
+    _ripristina_materiali(tipologia, quantita, con_etichetta=False, con_capsula=con_capsula)
+
+    # Sottrai dal lotto senza etichetta
+    lotto = LottoBottiglie.objects.filter(
+        tipologia_vino=tipologia,
+        stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+        ha_etichetta=False,
+        ha_capsula=con_capsula,
+    ).first()
+
+    if lotto:
+        if lotto.quantita > quantita:
+            lotto.quantita -= quantita
+            lotto.save(update_fields=['quantita', 'data_aggiornamento'])
+        elif lotto.quantita == quantita:
+            lotto.delete()
+        else:
+            # Se ci sono meno bottiglie nel lotto di quanto annullare, eliminiamo solo quello che c'è
+            lotto.delete()
+
+
+def _annulla_crea_con_etichetta(op):
+    """Annulla creazione con etichetta: ripristina materiali e rimuove dal lotto completo."""
+    tipologia = op.tipologia_vino
+    quantita = op.quantita
+    con_capsula = op.con_capsula
+
+    # Ripristina materiali in magazzino
+    _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=con_capsula)
+
+    # Sottrai dal lotto completo
+    lotto = LottoBottiglie.objects.filter(
+        tipologia_vino=tipologia,
+        stato=LottoBottiglie.Stato.COMPLETA,
+        ha_etichetta=True,
+        ha_capsula=con_capsula,
+    ).first()
+
+    if lotto:
+        if lotto.quantita > quantita:
+            lotto.quantita -= quantita
+            lotto.save(update_fields=['quantita', 'data_aggiornamento'])
+        else:
+            lotto.delete()
+
+
+def _annulla_associa_etichetta(op):
+    """
+    Annulla associa etichetta: 
+    - Rimette etichette (e capsule se aggiunte) in magazzino
+    - Sottrae dal lotto destinazione
+    - Riporta le bottiglie come "senza etichetta" della tipologia origine
+    """
+    tipologia_origine = op.tipologia_vino
+    tipologia_dest = op.tipologia_vino_destinazione
+    quantita = op.quantita
+    con_capsula = op.con_capsula
+    capsule_aggiunte = op.dettagli.get('capsule_aggiunte', 0)
+
+    # Verifica che ci siano abbastanza bottiglie nel lotto destinazione
+    lotto_dest = LottoBottiglie.objects.filter(
+        tipologia_vino=tipologia_dest,
+        stato=LottoBottiglie.Stato.COMPLETA,
+        ha_etichetta=True,
+        ha_capsula=con_capsula,
+    ).first()
+
+    disponibili = lotto_dest.quantita if lotto_dest else 0
+    if disponibili < quantita:
+        return (
+            f"Impossibile annullare: il lotto di destinazione ha solo {disponibili} "
+            f"bottiglie ({tipologia_dest}), ne servono {quantita}. "
+            "Le bottiglie potrebbero essere state spostate o vendute."
+        )
+
+    # Ripristina etichette in magazzino
+    tipologia_dest.tipo_etichetta.quantita += quantita
+    tipologia_dest.tipo_etichetta.save(update_fields=['quantita'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+        categoria=MovimentoMagazzino.Categoria.ETICHETTA,
+        quantita=quantita,
+        descrizione=f"Annullamento associa etichetta: ripristino {quantita} etichette '{tipologia_dest.tipo_etichetta.nome}'",
+    )
+
+    # Ripristina capsule se erano state aggiunte
+    if capsule_aggiunte > 0:
+        tipologia_dest.tipo_capsula.quantita += capsule_aggiunte
+        tipologia_dest.tipo_capsula.save(update_fields=['quantita'])
+        MovimentoMagazzino.objects.create(
+            tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+            categoria=MovimentoMagazzino.Categoria.CAPSULA,
+            quantita=capsule_aggiunte,
+            descrizione=f"Annullamento associa etichetta: ripristino {capsule_aggiunte} capsule",
+        )
+
+    # Sottrai dal lotto destinazione
+    if lotto_dest.quantita > quantita:
+        lotto_dest.quantita -= quantita
+        lotto_dest.save(update_fields=['quantita', 'data_aggiornamento'])
+    else:
+        lotto_dest.delete()
+
+    # Rimetti come bottiglie senza etichetta della ORIGINE
+    # Stato capsula: se nello step originale era stato attivato il flag, le bottiglie 
+    # ora hanno la capsula. Altrimenti seguono lo stato originale.
+    # Per semplicità, se capsule erano state aggiunte, mettiamo bottiglie con capsula
+    # nelle bottiglie senza etichetta. Per il resto, senza capsula.
+    bottiglie_con_capsula_da_ripristinare = quantita - capsule_aggiunte
+    bottiglie_senza_capsula_da_ripristinare = capsule_aggiunte if con_capsula else (quantita if not con_capsula else 0)
+    
+    # In realtà, per essere coerenti:
+    # - se con_capsula=True: alcune avevano capsula (quantita - capsule_aggiunte) altre no (capsule_aggiunte)
+    #   ma ora tutte hanno capsula, quindi rimetto tutte CON capsula? No, ripristino lo stato precedente.
+    #   capsule_aggiunte = quante NON avevano capsula prima
+    #   quindi: senza capsula = capsule_aggiunte, con capsula = quantita - capsule_aggiunte
+    # - se con_capsula=False: nessuna capsula aggiunta, quindi rimangono come prima
+    #   tutte avevano lo stato originale che però non sappiamo... assumiamo tutte CON (più probabile)
+    
+    if con_capsula:
+        senza_cap = capsule_aggiunte
+        con_cap = quantita - capsule_aggiunte
+    else:
+        # Caso "senza capsula" nel form: prendevamo prima quelle CON capsula
+        # quindi quelle ripristinate erano con capsula
+        senza_cap = 0
+        con_cap = quantita
+
+    # Crea lotto senza etichetta CON capsula (se applicabile)
+    if con_cap > 0:
+        lotto_con = LottoBottiglie.objects.filter(
+            tipologia_vino=tipologia_origine,
+            stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+            ha_etichetta=False,
+            ha_capsula=True,
+        ).first()
+        if lotto_con:
+            lotto_con.quantita += con_cap
+            lotto_con.save(update_fields=['quantita', 'data_aggiornamento'])
+        else:
+            LottoBottiglie.objects.create(
+                tipologia_vino=tipologia_origine,
+                quantita=con_cap,
+                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                ha_etichetta=False,
+                ha_capsula=True,
+            )
+
+    # Crea lotto senza etichetta SENZA capsula (se applicabile)
+    if senza_cap > 0:
+        lotto_sc = LottoBottiglie.objects.filter(
+            tipologia_vino=tipologia_origine,
+            stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+            ha_etichetta=False,
+            ha_capsula=False,
+        ).first()
+        if lotto_sc:
+            lotto_sc.quantita += senza_cap
+            lotto_sc.save(update_fields=['quantita', 'data_aggiornamento'])
+        else:
+            LottoBottiglie.objects.create(
+                tipologia_vino=tipologia_origine,
+                quantita=senza_cap,
+                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                ha_etichetta=False,
+                ha_capsula=False,
+            )
+
+    return None  # nessun errore
+
+
+def _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=True):
+    """Rimette materiali in magazzino e vino nel silos (inverso di _scala_materiali)."""
+    is_spumante = tipologia.famiglia.is_spumante
+    capacita_bottiglia = tipologia.tipo_bottiglia.capacita_litri
+    litri = Decimal(str(quantita)) * capacita_bottiglia
+    cap = tipologia.tipo_cartone.capacita_bottiglie
+    cartoni = -(-quantita // cap)
+
+    # Ripristina vino
+    tipologia.quantita_litri += litri
+    tipologia.save(update_fields=['quantita_litri'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+        categoria=MovimentoMagazzino.Categoria.VINO,
+        quantita=litri,
+        descrizione=f"Ripristino {litri}L per annullamento ({tipologia})",
+    )
+
+    # Ripristina bottiglie
+    tipologia.tipo_bottiglia.quantita += quantita
+    tipologia.tipo_bottiglia.save(update_fields=['quantita'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+        categoria=MovimentoMagazzino.Categoria.BOTTIGLIA,
+        quantita=quantita,
+        descrizione=f"Ripristino {quantita} bottiglie '{tipologia.tipo_bottiglia.nome}'",
+    )
+
+    # Ripristina tappi
+    tipologia.tipo_tappo.quantita += quantita
+    tipologia.tipo_tappo.save(update_fields=['quantita'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+        categoria=MovimentoMagazzino.Categoria.TAPPO,
+        quantita=quantita,
+        descrizione=f"Ripristino {quantita} tappi '{tipologia.tipo_tappo.nome}'",
+    )
+
+    # Ripristina etichette
+    if con_etichetta:
+        tipologia.tipo_etichetta.quantita += quantita
+        tipologia.tipo_etichetta.save(update_fields=['quantita'])
+        MovimentoMagazzino.objects.create(
+            tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+            categoria=MovimentoMagazzino.Categoria.ETICHETTA,
+            quantita=quantita,
+            descrizione=f"Ripristino {quantita} etichette '{tipologia.tipo_etichetta.nome}'",
+        )
+
+    # Ripristina capsule
+    if con_capsula:
+        tipologia.tipo_capsula.quantita += quantita
+        tipologia.tipo_capsula.save(update_fields=['quantita'])
+        MovimentoMagazzino.objects.create(
+            tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+            categoria=MovimentoMagazzino.Categoria.CAPSULA,
+            quantita=quantita,
+            descrizione=f"Ripristino {quantita} capsule '{tipologia.tipo_capsula.nome}'",
+        )
+
+    # Ripristina cestelli
+    if is_spumante and tipologia.tipo_cestello:
+        tipologia.tipo_cestello.quantita += quantita
+        tipologia.tipo_cestello.save(update_fields=['quantita'])
+        MovimentoMagazzino.objects.create(
+            tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+            categoria=MovimentoMagazzino.Categoria.CESTELLO,
+            quantita=quantita,
+            descrizione=f"Ripristino {quantita} cestelli",
+        )
+
+    # Ripristina cartoni
+    tipologia.tipo_cartone.quantita += cartoni
+    tipologia.tipo_cartone.save(update_fields=['quantita'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ANNULLAMENTO,
+        categoria=MovimentoMagazzino.Categoria.CARTONE,
+        quantita=cartoni,
+        descrizione=f"Ripristino {cartoni} cartoni '{tipologia.tipo_cartone.nome}'",
+    )

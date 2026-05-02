@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Wine, Trash2, Droplets } from 'lucide-react';
+import { Plus, Wine, Trash2, Droplets, Edit3 } from 'lucide-react';
 import Modal from '../components/Modal';
+import { useConfirm } from '../components/ConfirmDialog';
 import {
   famiglie as famiglieApi,
   tipologieVino,
@@ -10,6 +11,7 @@ import {
 } from '../api/client';
 
 export default function TipologieVino() {
+  const confirm = useConfirm();
   const [tipologie, setTipologie] = useState([]);
   const [famiglieList, setFamiglieList] = useState([]);
   const [materiali, setMateriali] = useState({});
@@ -17,14 +19,15 @@ export default function TipologieVino() {
   const [showModal, setShowModal] = useState(false);
   const [showFamigliaModal, setShowFamigliaModal] = useState(false);
 
-  // Form nuova tipologia
-  const [form, setForm] = useState({
+  const [editingId, setEditingId] = useState(null);
+  const [editingFamigliaId, setEditingFamigliaId] = useState(null);
+
+  const emptyForm = {
     nome: '', famiglia: '', quantita_litri: 0,
     tipo_cartone: '', tipo_tappo: '', tipo_bottiglia: '',
     tipo_etichetta: '', tipo_capsula: '', tipo_cestello: '',
-  });
-
-  // Form nuova famiglia
+  };
+  const [form, setForm] = useState(emptyForm);
   const [famigliaForm, setFamigliaForm] = useState({ nome: '', is_spumante: false });
 
   const loadAll = async () => {
@@ -61,10 +64,32 @@ export default function TipologieVino() {
   const selectedFamiglia = famiglieList.find(f => f.id === Number(form.famiglia));
   const isSpumante = selectedFamiglia?.is_spumante || false;
 
+  const openCreate = () => {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowModal(true);
+  };
+
+  const openEdit = (t) => {
+    setEditingId(t.id);
+    setForm({
+      nome: t.nome,
+      famiglia: t.famiglia,
+      quantita_litri: t.quantita_litri,
+      tipo_cartone: t.tipo_cartone,
+      tipo_tappo: t.tipo_tappo,
+      tipo_bottiglia: t.tipo_bottiglia,
+      tipo_etichetta: t.tipo_etichetta,
+      tipo_capsula: t.tipo_capsula,
+      tipo_cestello: t.tipo_cestello || '',
+    });
+    setShowModal(true);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await tipologieVino.create({
+      const payload = {
         nome: form.nome,
         famiglia: Number(form.famiglia),
         quantita_litri: parseFloat(form.quantita_litri) || 0,
@@ -74,10 +99,17 @@ export default function TipologieVino() {
         tipo_etichetta: Number(form.tipo_etichetta),
         tipo_capsula: Number(form.tipo_capsula),
         tipo_cestello: isSpumante ? Number(form.tipo_cestello) || null : null,
-      });
-      toast.success('Tipologia creata!');
+      };
+      if (editingId) {
+        await tipologieVino.update(editingId, payload);
+        toast.success('Tipologia aggiornata!');
+      } else {
+        await tipologieVino.create(payload);
+        toast.success('Tipologia creata!');
+      }
       setShowModal(false);
-      setForm({ nome: '', famiglia: '', quantita_litri: 0, tipo_cartone: '', tipo_tappo: '', tipo_bottiglia: '', tipo_etichetta: '', tipo_capsula: '', tipo_cestello: '' });
+      setForm(emptyForm);
+      setEditingId(null);
       loadAll();
     } catch (e) {
       const msg = e.response?.data;
@@ -85,27 +117,68 @@ export default function TipologieVino() {
     }
   };
 
+  const openCreateFamiglia = () => {
+    setEditingFamigliaId(null);
+    setFamigliaForm({ nome: '', is_spumante: false });
+    setShowFamigliaModal(true);
+  };
+
+  const openEditFamiglia = (f) => {
+    setEditingFamigliaId(f.id);
+    setFamigliaForm({ nome: f.nome, is_spumante: f.is_spumante });
+    setShowFamigliaModal(true);
+  };
+
   const handleFamigliaSubmit = async (e) => {
     e.preventDefault();
     try {
-      await famiglieApi.create(famigliaForm);
-      toast.success('Famiglia creata!');
+      if (editingFamigliaId) {
+        await famiglieApi.update(editingFamigliaId, famigliaForm);
+        toast.success('Famiglia aggiornata!');
+      } else {
+        await famiglieApi.create(famigliaForm);
+        toast.success('Famiglia creata!');
+      }
       setShowFamigliaModal(false);
       setFamigliaForm({ nome: '', is_spumante: false });
+      setEditingFamigliaId(null);
       loadAll();
     } catch (e) {
-      toast.error('Errore nella creazione famiglia');
+      toast.error('Errore');
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Eliminare questa tipologia?')) return;
+  const handleDelete = async (t) => {
+    const ok = await confirm({
+      title: 'Eliminare la tipologia?',
+      message: `Stai per eliminare "${t.famiglia_nome} — ${t.nome}". Questa azione non può essere annullata.`,
+      confirmLabel: 'Elimina',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
-      await tipologieVino.delete(id);
-      toast.success('Eliminata');
+      await tipologieVino.delete(t.id);
+      toast.success('Tipologia eliminata');
       loadAll();
     } catch (e) {
       toast.error('Impossibile eliminare: potrebbe essere in uso');
+    }
+  };
+
+  const handleDeleteFamiglia = async (f) => {
+    const ok = await confirm({
+      title: 'Eliminare la famiglia?',
+      message: `Stai per eliminare la famiglia "${f.nome}". Verranno eliminate anche tutte le tipologie associate. Questa azione non può essere annullata.`,
+      confirmLabel: 'Elimina',
+      variant: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await famiglieApi.delete(f.id);
+      toast.success('Famiglia eliminata');
+      loadAll();
+    } catch (e) {
+      toast.error('Impossibile eliminare: ci sono tipologie associate');
     }
   };
 
@@ -115,7 +188,6 @@ export default function TipologieVino() {
     </div>
   );
 
-  // Raggruppa per famiglia
   const grouped = {};
   tipologie.forEach(t => {
     const fam = t.famiglia_nome || 'Senza famiglia';
@@ -131,13 +203,39 @@ export default function TipologieVino() {
           <p className="text-bark-500">Gestisci le tipologie di vino e i materiali associati</p>
         </div>
         <div className="flex gap-3">
-          <button onClick={() => setShowFamigliaModal(true)} className="btn-secondary flex items-center gap-2">
+          <button onClick={openCreateFamiglia} className="btn-secondary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Nuova Famiglia
           </button>
-          <button onClick={() => setShowModal(true)} className="btn-primary flex items-center gap-2">
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Nuova Tipologia
           </button>
         </div>
+      </div>
+
+      <div className="card">
+        <h2 className="section-title">Famiglie</h2>
+        {famiglieList.length === 0 ? (
+          <p className="text-bark-400 text-sm">Nessuna famiglia creata.</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {famiglieList.map(f => (
+              <div key={f.id} className="group flex items-center gap-2 px-3 py-2 rounded-lg bg-bark-50 border border-bark-100">
+                <span className="font-medium text-bark-800">{f.nome}</span>
+                {f.is_spumante && <span className="badge-wine text-xs">Spumante</span>}
+                <button onClick={() => openEditFamiglia(f)}
+                  className="p-1 rounded hover:bg-white text-bark-400 hover:text-wine-600 transition-colors"
+                  title="Modifica">
+                  <Edit3 className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => handleDeleteFamiglia(f)}
+                  className="p-1 rounded hover:bg-white text-bark-400 hover:text-red-500 transition-colors"
+                  title="Elimina">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {Object.keys(grouped).length === 0 ? (
@@ -168,7 +266,7 @@ export default function TipologieVino() {
                     <th className="table-header">Capsula</th>
                     <th className="table-header">Cartone</th>
                     {items[0]?.famiglia_is_spumante && <th className="table-header">Cestello</th>}
-                    <th className="table-header w-16"></th>
+                    <th className="table-header w-24">Azioni</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -190,10 +288,18 @@ export default function TipologieVino() {
                         <td className="table-cell text-bark-600">{t.tipo_cestello_nome || '—'}</td>
                       )}
                       <td className="table-cell">
-                        <button onClick={() => handleDelete(t.id)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex gap-1">
+                          <button onClick={() => openEdit(t)}
+                            className="p-1.5 rounded-lg hover:bg-wine-50 text-bark-400 hover:text-wine-600 transition-colors"
+                            title="Modifica">
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDelete(t)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
+                            title="Elimina">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -204,8 +310,8 @@ export default function TipologieVino() {
         ))
       )}
 
-      {/* Modal Nuova Tipologia */}
-      <Modal open={showModal} onClose={() => setShowModal(false)} title="Nuova Tipologia di Vino" wide>
+      <Modal open={showModal} onClose={() => setShowModal(false)}
+        title={editingId ? 'Modifica Tipologia' : 'Nuova Tipologia di Vino'} wide>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -228,7 +334,7 @@ export default function TipologieVino() {
           </div>
 
           <div>
-            <label className="label">Quantità iniziale nel silos (litri)</label>
+            <label className="label">Quantità nel silos (litri)</label>
             <input type="number" step="0.01" min="0" className="input-field"
               value={form.quantita_litri} onChange={e => setForm({...form, quantita_litri: e.target.value})} />
           </div>
@@ -303,13 +409,15 @@ export default function TipologieVino() {
 
           <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
             <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
-            <button type="submit" className="btn-primary">Crea Tipologia</button>
+            <button type="submit" className="btn-primary">
+              {editingId ? 'Salva Modifiche' : 'Crea Tipologia'}
+            </button>
           </div>
         </form>
       </Modal>
 
-      {/* Modal Nuova Famiglia */}
-      <Modal open={showFamigliaModal} onClose={() => setShowFamigliaModal(false)} title="Nuova Famiglia">
+      <Modal open={showFamigliaModal} onClose={() => setShowFamigliaModal(false)}
+        title={editingFamigliaId ? 'Modifica Famiglia' : 'Nuova Famiglia'}>
         <form onSubmit={handleFamigliaSubmit} className="space-y-4">
           <div>
             <label className="label">Nome famiglia</label>
@@ -324,7 +432,9 @@ export default function TipologieVino() {
           </label>
           <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
             <button type="button" onClick={() => setShowFamigliaModal(false)} className="btn-secondary">Annulla</button>
-            <button type="submit" className="btn-primary">Crea Famiglia</button>
+            <button type="submit" className="btn-primary">
+              {editingFamigliaId ? 'Salva Modifiche' : 'Crea Famiglia'}
+            </button>
           </div>
         </form>
       </Modal>

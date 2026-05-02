@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
     TipoCapsula, TipoCestello, FamigliaVino, TipologiaVino,
-    LottoBottiglie, MovimentoMagazzino,
+    LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
 )
 
 
@@ -56,6 +56,9 @@ class TipologiaVinoSerializer(serializers.ModelSerializer):
     famiglia_nome = serializers.CharField(source='famiglia.nome', read_only=True)
     famiglia_is_spumante = serializers.BooleanField(source='famiglia.is_spumante', read_only=True)
     tipo_cartone_nome = serializers.CharField(source='tipo_cartone.nome', read_only=True)
+    tipo_cartone_capacita = serializers.IntegerField(
+        source='tipo_cartone.capacita_bottiglie', read_only=True
+    )
     tipo_tappo_nome = serializers.CharField(source='tipo_tappo.nome', read_only=True)
     tipo_bottiglia_nome = serializers.CharField(source='tipo_bottiglia.nome', read_only=True)
     tipo_bottiglia_capacita = serializers.DecimalField(
@@ -134,3 +137,16 @@ class CaricoMagazzinoSerializer(serializers.Serializer):
     ])
     tipo_id = serializers.IntegerField()
     quantita = serializers.IntegerField(min_value=1)
+
+
+class OperazioneImbottigliamentoSerializer(serializers.ModelSerializer):
+    tipo_display = serializers.CharField(source='get_tipo_display', read_only=True)
+    stato_display = serializers.CharField(source='get_stato_display', read_only=True)
+    tipologia_vino_nome = serializers.CharField(source='tipologia_vino.__str__', read_only=True)
+    tipologia_vino_destinazione_nome = serializers.CharField(
+        source='tipologia_vino_destinazione.__str__', read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = OperazioneImbottigliamento
+        fields = '__all__'

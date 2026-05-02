@@ -195,6 +195,7 @@ class MovimentoMagazzino(models.Model):
         CARICO = 'CARICO', 'Carico'
         SCARICO = 'SCARICO', 'Scarico (imbottigliamento)'
         AGGIUNTA_VINO = 'AGGIUNTA_VINO', 'Aggiunta vino al silos'
+        ANNULLAMENTO = 'ANNULLAMENTO', 'Annullamento operazione'
 
     class Categoria(models.TextChoices):
         TAPPO = 'TAPPO', 'Tappo'
@@ -221,3 +222,53 @@ class MovimentoMagazzino(models.Model):
 
     def __str__(self):
         return f"{self.tipo} {self.categoria} × {self.quantita} — {self.data:%d/%m/%Y}"
+
+
+# ─── OPERAZIONI IMBOTTIGLIAMENTO (per annullamento) ───────────────────────
+
+class OperazioneImbottigliamento(models.Model):
+    """
+    Snapshot di ogni operazione di imbottigliamento, per permettere l'annullamento.
+    Memorizza tutto ciò che è stato consumato/prodotto, in modo da poterlo invertire.
+    """
+
+    class TipoOperazione(models.TextChoices):
+        CREA_SENZA_ETICHETTA = 'CREA_SENZA_ETICHETTA', 'Crea senza etichetta'
+        CREA_CON_ETICHETTA = 'CREA_CON_ETICHETTA', 'Crea con etichetta'
+        ASSOCIA_ETICHETTA = 'ASSOCIA_ETICHETTA', 'Associa etichetta'
+
+    class Stato(models.TextChoices):
+        ATTIVA = 'ATTIVA', 'Attiva'
+        ANNULLATA = 'ANNULLATA', 'Annullata'
+
+    tipo = models.CharField(max_length=30, choices=TipoOperazione.choices)
+    stato = models.CharField(max_length=20, choices=Stato.choices, default=Stato.ATTIVA)
+    data = models.DateTimeField(auto_now_add=True)
+    data_annullamento = models.DateTimeField(null=True, blank=True)
+
+    # Tipologie coinvolte (origine = sempre, destinazione solo per associa etichetta)
+    tipologia_vino = models.ForeignKey(
+        TipologiaVino, on_delete=models.PROTECT, related_name='operazioni'
+    )
+    tipologia_vino_destinazione = models.ForeignKey(
+        TipologiaVino, on_delete=models.PROTECT, related_name='operazioni_dest',
+        null=True, blank=True
+    )
+
+    quantita = models.PositiveIntegerField()
+    con_etichetta = models.BooleanField(default=False)
+    con_capsula = models.BooleanField(default=False)
+
+    # Snapshot completo dei consumi (per l'annullamento)
+    # JSON con: vino_litri, bottiglie, tappi, etichette, capsule, cartoni, cestelli
+    # e i dettagli per tipo (es: capsule_da_aggiungere per associa etichetta)
+    dettagli = models.JSONField(default=dict)
+
+    note = models.TextField(blank=True, default='')
+
+    class Meta:
+        verbose_name_plural = "Operazioni imbottigliamento"
+        ordering = ['-data']
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} × {self.quantita} — {self.tipologia_vino} ({self.get_stato_display()})"

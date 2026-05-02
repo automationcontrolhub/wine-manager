@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck, Grape } from 'lucide-react';
+import { Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck, Grape, Edit3 } from 'lucide-react';
 import Modal from '../components/Modal';
+import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipoCartone, tipoTappo, tipoBottiglia,
   tipoEtichetta, tipoCapsula, tipoCestello,
@@ -53,11 +54,13 @@ const SEZIONI = [
 ];
 
 export default function Configurazione() {
+  const confirm = useConfirm();
   const [data, setData] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('cartone');
   const [showModal, setShowModal] = useState(false);
   const [form, setForm] = useState({});
+  const [editingId, setEditingId] = useState(null);
 
   const loadAll = async () => {
     setLoading(true);
@@ -78,13 +81,35 @@ export default function Configurazione() {
 
   const currentSection = SEZIONI.find(s => s.key === activeTab);
 
-  const handleCreate = async (e) => {
+  const openCreate = () => {
+    setEditingId(null);
+    setForm({});
+    setShowModal(true);
+  };
+
+  const openEdit = (item) => {
+    setEditingId(item.id);
+    const initialForm = {};
+    currentSection.campi.forEach(c => {
+      initialForm[c.name] = item[c.name];
+    });
+    setForm(initialForm);
+    setShowModal(true);
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      await currentSection.api.create(form);
-      toast.success(`${currentSection.label.slice(0, -1)} creato!`);
+      if (editingId) {
+        await currentSection.api.update(editingId, form);
+        toast.success(`${currentSection.label.slice(0, -1)} aggiornato!`);
+      } else {
+        await currentSection.api.create(form);
+        toast.success(`${currentSection.label.slice(0, -1)} creato!`);
+      }
       setShowModal(false);
       setForm({});
+      setEditingId(null);
       loadAll();
     } catch (e) {
       const msg = e.response?.data;
@@ -92,10 +117,16 @@ export default function Configurazione() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Eliminare questo elemento?')) return;
+  const handleDelete = async (item) => {
+    const ok = await confirm({
+      title: 'Conferma eliminazione',
+      message: `Stai per eliminare "${item.nome}". Questa azione non può essere annullata.\n\nNota: l'eliminazione fallirà se è in uso da una tipologia di vino.`,
+      confirmLabel: 'Elimina',
+      variant: 'danger',
+    });
+    if (!ok) return;
     try {
-      await currentSection.api.delete(id);
+      await currentSection.api.delete(item.id);
       toast.success('Eliminato!');
       loadAll();
     } catch (e) {
@@ -121,7 +152,6 @@ export default function Configurazione() {
         <p className="text-bark-500">Gestisci le tipologie di materiali</p>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 bg-bark-100 rounded-xl p-1 flex-wrap">
         {SEZIONI.map(sez => {
           const Icon = sez.icon;
@@ -147,15 +177,13 @@ export default function Configurazione() {
         })}
       </div>
 
-      {/* Contenuto */}
       <div className="card animate-fade-in">
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title mb-0 flex items-center gap-2">
             {React.createElement(currentSection.icon, { className: 'w-5 h-5 text-wine-600' })}
             {currentSection.label}
           </h2>
-          <button onClick={() => { setForm({}); setShowModal(true); }}
-            className="btn-primary flex items-center gap-2">
+          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Aggiungi
           </button>
         </div>
@@ -174,7 +202,7 @@ export default function Configurazione() {
                   {currentSection.colonneLabel.map((col, i) => (
                     <th key={i} className="table-header">{col}</th>
                   ))}
-                  <th className="table-header w-16"></th>
+                  <th className="table-header w-24">Azioni</th>
                 </tr>
               </thead>
               <tbody>
@@ -195,10 +223,18 @@ export default function Configurazione() {
                       </td>
                     ))}
                     <td className="table-cell">
-                      <button onClick={() => handleDelete(item.id)}
-                        className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex gap-1">
+                        <button onClick={() => openEdit(item)}
+                          className="p-1.5 rounded-lg hover:bg-wine-50 text-bark-400 hover:text-wine-600 transition-colors"
+                          title="Modifica">
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                        <button onClick={() => handleDelete(item)}
+                          className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
+                          title="Elimina">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -208,10 +244,11 @@ export default function Configurazione() {
         )}
       </div>
 
-      {/* Modal Aggiungi */}
       <Modal open={showModal} onClose={() => setShowModal(false)}
-        title={`Nuovo tipo di ${currentSection?.label.toLowerCase().slice(0, -1) || ''}`}>
-        <form onSubmit={handleCreate} className="space-y-4">
+        title={editingId
+          ? `Modifica ${currentSection?.label.toLowerCase().slice(0, -1) || ''}`
+          : `Nuovo tipo di ${currentSection?.label.toLowerCase().slice(0, -1) || ''}`}>
+        <form onSubmit={handleSubmit} className="space-y-4">
           {currentSection?.campi.map(campo => (
             <div key={campo.name}>
               <label className="label">{campo.label}</label>
@@ -221,14 +258,16 @@ export default function Configurazione() {
                 required={campo.required}
                 className="input-field"
                 placeholder={campo.label}
-                value={form[campo.name] || ''}
+                value={form[campo.name] ?? ''}
                 onChange={e => setForm({...form, [campo.name]: e.target.value})}
               />
             </div>
           ))}
           <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
             <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
-            <button type="submit" className="btn-primary">Crea</button>
+            <button type="submit" className="btn-primary">
+              {editingId ? 'Salva Modifiche' : 'Crea'}
+            </button>
           </div>
         </form>
       </Modal>

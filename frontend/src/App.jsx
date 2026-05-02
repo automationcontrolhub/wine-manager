@@ -5,6 +5,7 @@ import {
   LayoutDashboard, Wine, Warehouse, Package, Settings, GlassWater,
   ChevronLeft, ChevronRight
 } from 'lucide-react';
+import { ConfirmProvider } from './components/ConfirmDialog';
 import Dashboard from './pages/Dashboard';
 import TipologieVino from './pages/TipologieVino';
 import Magazzino from './pages/Magazzino';
@@ -72,33 +73,35 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          duration: 3000,
-          style: {
-            fontFamily: '"Source Sans 3", sans-serif',
-            borderRadius: '10px',
-            background: '#2f2019',
-            color: '#faf8f5',
-          },
-        }}
-      />
-      <div className="flex min-h-screen bg-[#faf8f5]">
-        <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
-        <main className={`flex-1 transition-all duration-300 ${collapsed ? 'ml-[72px]' : 'ml-64'}`}>
-          <div className="p-8 max-w-7xl mx-auto">
-            <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/tipologie" element={<TipologieVino />} />
-              <Route path="/magazzino" element={<Magazzino />} />
-              <Route path="/imbottigliamento" element={<Imbottigliamento />} />
-              <Route path="/configurazione" element={<Configurazione />} />
-            </Routes>
-          </div>
-        </main>
-      </div>
+      <ConfirmProvider>
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 3000,
+            style: {
+              fontFamily: '"Source Sans 3", sans-serif',
+              borderRadius: '10px',
+              background: '#2f2019',
+              color: '#faf8f5',
+            },
+          }}
+        />
+        <div className="flex min-h-screen bg-[#faf8f5]">
+          <Sidebar collapsed={collapsed} setCollapsed={setCollapsed} />
+          <main className={`flex-1 transition-all duration-300 ${collapsed ? 'ml-[72px]' : 'ml-64'}`}>
+            <div className="p-8 max-w-7xl mx-auto">
+              <Routes>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/tipologie" element={<TipologieVino />} />
+                <Route path="/magazzino" element={<Magazzino />} />
+                <Route path="/imbottigliamento" element={<Imbottigliamento />} />
+                <Route path="/configurazione" element={<Configurazione />} />
+              </Routes>
+            </div>
+          </main>
+        </div>
+      </ConfirmProvider>
     </BrowserRouter>
   );
 }

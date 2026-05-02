@@ -38,6 +38,11 @@ export const movimenti = {
   list: (params) => api.get('/movimenti/', { params }).then(r => r.data),
 };
 
+export const operazioni = {
+  list: (params) => api.get('/operazioni/', { params }).then(r => r.data),
+  annulla: (id) => api.post(`/operazioni/${id}/annulla/`).then(r => r.data),
+};
+
 // ─── Operazioni ──────────────────────────────────────────────────────────
 
 export const aggiuntaVino = (data) =>
