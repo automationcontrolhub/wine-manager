@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Package, Wine, ArrowUpCircle } from 'lucide-react';
+import { Plus, Package, Wine, ArrowUpCircle, Edit3 } from 'lucide-react';
 import Modal from '../components/Modal';
+import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipoCartone, tipoTappo, tipoBottiglia,
   tipoEtichetta, tipoCapsula, tipoCestello,
@@ -18,13 +19,18 @@ const CATEGORIE = [
 ];
 
 export default function Magazzino() {
+  const confirm = useConfirm();
   const [data, setData] = useState({});
   const [tipologie, setTipologie] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCarico, setShowCarico] = useState(false);
   const [showVinoModal, setShowVinoModal] = useState(false);
+  const [showEditQty, setShowEditQty] = useState(false);
   const [caricoForm, setCaricoForm] = useState({ categoria: '', tipo_id: '', quantita: '' });
   const [vinoForm, setVinoForm] = useState({ tipologia_vino_id: '', litri: '' });
+  const [editForm, setEditForm] = useState({ categoria: '', id: null, nome: '', quantita: '' });
+  const [showEditSilos, setShowEditSilos] = useState(false);
+  const [editSilosForm, setEditSilosForm] = useState({ id: null, nome: '', litri: '' });
   const [activeTab, setActiveTab] = useState('cartone');
 
   const loadAll = async () => {
@@ -81,6 +87,42 @@ export default function Magazzino() {
 
   const catObj = CATEGORIE.find(c => c.key === caricoForm.categoria);
   const itemsForCarico = catObj ? (data[catObj.key] || []) : [];
+
+  const openEditQty = (catKey, item) => {
+    setEditForm({ categoria: catKey, id: item.id, nome: item.nome, quantita: item.quantita });
+    setShowEditQty(true);
+  };
+
+  const handleEditQty = async (e) => {
+    e.preventDefault();
+    const catDef = CATEGORIE.find(c => c.key === editForm.categoria);
+    if (!catDef) return;
+    try {
+      await catDef.api.update(editForm.id, { quantita: Number(editForm.quantita) });
+      toast.success(`Quantità di "${editForm.nome}" aggiornata`);
+      setShowEditQty(false);
+      loadAll();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Errore nell\'aggiornamento');
+    }
+  };
+
+  const openEditSilos = (tipologia) => {
+    setEditSilosForm({ id: tipologia.id, nome: `${tipologia.famiglia_nome} — ${tipologia.nome}`, litri: tipologia.quantita_litri });
+    setShowEditSilos(true);
+  };
+
+  const handleEditSilos = async (e) => {
+    e.preventDefault();
+    try {
+      await tipologieVino.update(editSilosForm.id, { quantita_litri: parseFloat(editSilosForm.litri) });
+      toast.success('Quantità silos aggiornata');
+      setShowEditSilos(false);
+      loadAll();
+    } catch (e) {
+      toast.error(e.response?.data?.error || 'Errore nell\'aggiornamento');
+    }
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -141,6 +183,7 @@ export default function Magazzino() {
                     {cat.key === 'cartone' && <th className="table-header">Capacità</th>}
                     {cat.key === 'bottiglia' && <th className="table-header">Capacità (L)</th>}
                     <th className="table-header text-right">Quantità</th>
+                    <th className="table-header w-16"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -159,6 +202,13 @@ export default function Magazzino() {
                         }`}>
                           {item.quantita.toLocaleString('it-IT')}
                         </span>
+                      </td>
+                      <td className="table-cell">
+                        <button onClick={() => openEditQty(cat.key, item)}
+                          className="p-1.5 rounded-lg hover:bg-wine-50 text-bark-400 hover:text-wine-600 transition-colors"
+                          title="Modifica quantità">
+                          <Edit3 className="w-4 h-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -184,9 +234,16 @@ export default function Magazzino() {
                   <p className="font-semibold text-bark-900">{t.nome}</p>
                   <p className="text-xs text-bark-500">{t.famiglia_nome}</p>
                 </div>
-                <span className="text-lg font-display font-bold text-wine-700">
-                  {parseFloat(t.quantita_litri).toLocaleString('it-IT')} L
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-lg font-display font-bold text-wine-700">
+                    {parseFloat(t.quantita_litri).toLocaleString('it-IT')} L
+                  </span>
+                  <button onClick={() => openEditSilos(t)}
+                    className="p-1.5 rounded-lg hover:bg-wine-50 text-bark-400 hover:text-wine-600 transition-colors"
+                    title="Modifica quantità silos">
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -253,6 +310,38 @@ export default function Magazzino() {
           <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
             <button type="button" onClick={() => setShowVinoModal(false)} className="btn-secondary">Annulla</button>
             <button type="submit" className="btn-success">Aggiungi Vino</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal Modifica Silos */}
+      <Modal open={showEditSilos} onClose={() => setShowEditSilos(false)} title={`Modifica silos — ${editSilosForm.nome}`}>
+        <form onSubmit={handleEditSilos} className="space-y-4">
+          <div>
+            <label className="label">Quantità in litri</label>
+            <input type="number" step="0.01" min="0" className="input-field" required
+              value={editSilosForm.litri}
+              onChange={e => setEditSilosForm({...editSilosForm, litri: e.target.value})} />
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
+            <button type="button" onClick={() => setShowEditSilos(false)} className="btn-secondary">Annulla</button>
+            <button type="submit" className="btn-primary">Salva</button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal Modifica Quantità */}
+      <Modal open={showEditQty} onClose={() => setShowEditQty(false)} title={`Modifica quantità — ${editForm.nome}`}>
+        <form onSubmit={handleEditQty} className="space-y-4">
+          <div>
+            <label className="label">Nuova quantità</label>
+            <input type="number" min="0" className="input-field" required
+              value={editForm.quantita}
+              onChange={e => setEditForm({...editForm, quantita: e.target.value})} />
+          </div>
+          <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
+            <button type="button" onClick={() => setShowEditQty(false)} className="btn-secondary">Annulla</button>
+            <button type="submit" className="btn-primary">Salva</button>
           </div>
         </form>
       </Modal>
