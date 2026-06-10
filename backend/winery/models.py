@@ -92,6 +92,20 @@ class TipoCestello(models.Model):
         return self.nome
 
 
+class TipoGadget(models.Model):
+    """Tipologia di gadget — es: Apribottiglie, Sacchetto regalo, ecc."""
+    nome = models.CharField(max_length=120, unique=True)
+    quantita = models.PositiveIntegerField(default=0, help_text="Scorta in magazzino")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "Tipi gadget"
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
+
 # ─── FAMIGLIA e TIPOLOGIA VINO ────────────────────────────────────────────
 
 class FamigliaVino(models.Model):
@@ -204,6 +218,7 @@ class MovimentoMagazzino(models.Model):
         ETICHETTA = 'ETICHETTA', 'Etichetta'
         CAPSULA = 'CAPSULA', 'Capsula'
         CESTELLO = 'CESTELLO', 'Cestello'
+        GADGET = 'GADGET', 'Gadget'
         VINO = 'VINO', 'Vino (litri)'
 
     tipo = models.CharField(max_length=20, choices=TipoMovimento.choices)

@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
-    TipoCapsula, TipoCestello, FamigliaVino, TipologiaVino,
+    TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
 )
 
@@ -41,6 +41,12 @@ class TipoCapsulaSerializer(serializers.ModelSerializer):
 class TipoCestelloSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoCestello
+        fields = '__all__'
+
+
+class TipoGadgetSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoGadget
         fields = '__all__'
 
 
@@ -133,7 +139,7 @@ class MovimentoMagazzinoSerializer(serializers.ModelSerializer):
 class CaricoMagazzinoSerializer(serializers.Serializer):
     """Per fare un carico di materiale in magazzino."""
     categoria = serializers.ChoiceField(choices=[
-        'cartone', 'tappo', 'bottiglia', 'etichetta', 'capsula', 'cestello'
+        'cartone', 'tappo', 'bottiglia', 'etichetta', 'capsula', 'cestello', 'gadget'
     ])
     tipo_id = serializers.IntegerField()
     quantita = serializers.IntegerField(min_value=1)

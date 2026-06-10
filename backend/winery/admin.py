@@ -1,7 +1,7 @@
 from django.contrib import admin
 from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
-    TipoCapsula, TipoCestello, FamigliaVino, TipologiaVino,
+    TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
 )
 
@@ -27,6 +27,10 @@ class TipoCapsulaAdmin(admin.ModelAdmin):
 
 @admin.register(TipoCestello)
 class TipoCestelloAdmin(admin.ModelAdmin):
+    list_display = ['nome', 'quantita']
+
+@admin.register(TipoGadget)
+class TipoGadgetAdmin(admin.ModelAdmin):
     list_display = ['nome', 'quantita']
 
 @admin.register(FamigliaVino)

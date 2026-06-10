@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck, Grape, Edit3 } from 'lucide-react';
+import { Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck, Grape, Edit3, Gift } from 'lucide-react';
 import Modal from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipoCartone, tipoTappo, tipoBottiglia,
-  tipoEtichetta, tipoCapsula, tipoCestello,
+  tipoEtichetta, tipoCapsula, tipoCestello, tipoGadget,
 } from '../api/client';
 
 const SEZIONI = [
@@ -47,6 +47,12 @@ const SEZIONI = [
   },
   {
     key: 'cestello', label: 'Cestelli', icon: Grape, api: tipoCestello,
+    campi: [{ name: 'nome', label: 'Nome', type: 'text', required: true }],
+    colonne: ['nome', 'quantita'],
+    colonneLabel: ['Nome', 'Scorta'],
+  },
+  {
+    key: 'gadget', label: 'Gadget', icon: Gift, api: tipoGadget,
     campi: [{ name: 'nome', label: 'Nome', type: 'text', required: true }],
     colonne: ['nome', 'quantita'],
     colonneLabel: ['Nome', 'Scorta'],

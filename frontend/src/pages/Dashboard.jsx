@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { getDashboard } from '../api/client';
 import {
   Wine, Package, Tag, Circle, Hexagon, ShieldCheck,
-  Grape, ArrowUpCircle, ArrowDownCircle, TrendingUp
+  Grape, ArrowUpCircle, ArrowDownCircle, TrendingUp, Gift
 } from 'lucide-react';
 
 function StatCard({ icon: Icon, label, value, sub, color }) {
@@ -109,6 +109,7 @@ export default function Dashboard() {
           { key: 'capsule', label: 'Capsule', icon: ShieldCheck },
           { key: 'cartoni', label: 'Cartoni', icon: Package },
           { key: 'cestelli', label: 'Cestelli', icon: Grape },
+          { key: 'gadget', label: 'Gadget', icon: Gift },
         ].map(({ key, label, icon: Icon }) => (
           <div key={key} className="card">
             <h3 className="flex items-center gap-2 text-sm font-bold text-bark-600 uppercase tracking-wider mb-3">

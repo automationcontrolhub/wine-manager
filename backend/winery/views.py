@@ -8,12 +8,13 @@ from rest_framework.response import Response
 
 from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
-    TipoCapsula, TipoCestello, FamigliaVino, TipologiaVino,
+    TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
 )
 from .serializers import (
     TipoCartoneSerializer, TipoTappoSerializer, TipoBottigliaSerializer,
     TipoEtichettaSerializer, TipoCapsulaSerializer, TipoCestelloSerializer,
+    TipoGadgetSerializer,
     FamigliaVinoSerializer, TipologiaVinoSerializer,
     LottoBottiglieSerializer, MovimentoMagazzinoSerializer,
     OperazioneImbottigliamentoSerializer,
@@ -58,6 +59,12 @@ class TipoCapsulaViewSet(viewsets.ModelViewSet):
 class TipoCestelloViewSet(viewsets.ModelViewSet):
     queryset = TipoCestello.objects.all()
     serializer_class = TipoCestelloSerializer
+    pagination_class = None
+
+
+class TipoGadgetViewSet(viewsets.ModelViewSet):
+    queryset = TipoGadget.objects.all()
+    serializer_class = TipoGadgetSerializer
     pagination_class = None
 
 
@@ -144,6 +151,7 @@ def carico_magazzino(request):
         'etichetta': (TipoEtichetta, MovimentoMagazzino.Categoria.ETICHETTA),
         'capsula': (TipoCapsula, MovimentoMagazzino.Categoria.CAPSULA),
         'cestello': (TipoCestello, MovimentoMagazzino.Categoria.CESTELLO),
+        'gadget': (TipoGadget, MovimentoMagazzino.Categoria.GADGET),
     }
 
     ModelClass, mov_cat = MODEL_MAP[cat]
@@ -638,6 +646,7 @@ def dashboard(request):
         'etichette': list(TipoEtichetta.objects.values('id', 'nome', 'quantita')),
         'capsule': list(TipoCapsula.objects.values('id', 'nome', 'quantita')),
         'cestelli': list(TipoCestello.objects.values('id', 'nome', 'quantita')),
+        'gadget': list(TipoGadget.objects.values('id', 'nome', 'quantita')),
     }
 
     # Silos vino

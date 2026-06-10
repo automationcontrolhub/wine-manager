@@ -22,6 +22,7 @@ export const tipoBottiglia = materiali('tipo-bottiglia');
 export const tipoEtichetta = materiali('tipo-etichetta');
 export const tipoCapsula = materiali('tipo-capsula');
 export const tipoCestello = materiali('tipo-cestello');
+export const tipoGadget = materiali('tipo-gadget');
 
 // ─── Famiglie e Tipologie vino ───────────────────────────────────────────
 

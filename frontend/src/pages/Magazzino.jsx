@@ -5,7 +5,7 @@ import Modal from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipoCartone, tipoTappo, tipoBottiglia,
-  tipoEtichetta, tipoCapsula, tipoCestello,
+  tipoEtichetta, tipoCapsula, tipoCestello, tipoGadget,
   tipologieVino, caricoMagazzino, aggiuntaVino,
 } from '../api/client';
 
@@ -16,6 +16,7 @@ const CATEGORIE = [
   { key: 'etichetta', label: 'Etichette', api: tipoEtichetta, fields: ['nome', 'quantita'] },
   { key: 'capsula', label: 'Capsule', api: tipoCapsula, fields: ['nome', 'quantita'] },
   { key: 'cestello', label: 'Cestelli', api: tipoCestello, fields: ['nome', 'quantita'] },
+  { key: 'gadget', label: 'Gadget', api: tipoGadget, fields: ['nome', 'quantita'] },
 ];
 
 export default function Magazzino() {
