@@ -67,4 +67,26 @@ export const getDashboard = () =>
 export const getBottiglieSenzaEtichetta = () =>
   api.get('/bottiglie-senza-etichetta/').then(r => r.data);
 
+// ─── Anagrafiche (clienti / agenti) ──────────────────────────────────────
+
+export const clienti = materiali('clienti');
+export const agenti = materiali('agenti');
+
+// ─── Bottiglie disponibili per ordine ────────────────────────────────────
+
+export const getBottiglieDisponibili = () =>
+  api.get('/bottiglie-disponibili/').then(r => r.data);
+
+// ─── Ordini ──────────────────────────────────────────────────────────────
+
+export const ordini = {
+  list: (params) => api.get('/ordini/', { params }).then(r => r.data),
+  retrieve: (id) => api.get(`/ordini/${id}/`).then(r => r.data),
+  create: (data) => api.post('/ordini/', data).then(r => r.data),
+  update: (id, data) => api.patch(`/ordini/${id}/`, data).then(r => r.data),
+  delete: (id) => api.delete(`/ordini/${id}/`),
+  annulla: (id) => api.post(`/ordini/${id}/annulla/`).then(r => r.data),
+  ripristina: (id) => api.post(`/ordini/${id}/ripristina/`).then(r => r.data),
+};
+
 export default api;

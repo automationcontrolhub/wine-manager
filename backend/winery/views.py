@@ -10,6 +10,7 @@ from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
     TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
+    Cliente, Agente, Ordine, RigaOrdineBottiglia, RigaOrdineGadget,
 )
 from .serializers import (
     TipoCartoneSerializer, TipoTappoSerializer, TipoBottigliaSerializer,
@@ -21,6 +22,9 @@ from .serializers import (
     CreaBottiglieSenzaEtichettaSerializer, CreaBottiglieConEtichettaSerializer,
     AssociaEtichettaSerializer, AggiuntaVinoSerializer,
     CaricoMagazzinoSerializer,
+    ClienteSerializer, AgenteSerializer,
+    OrdineSerializer, OrdineCreateSerializer,
+    BottiglieDisponibiliSerializer,
 )
 
 
@@ -1025,3 +1029,525 @@ def _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=T
         quantita=cartoni,
         descrizione=f"Ripristino {cartoni} cartoni '{tipologia.tipo_cartone.nome}'",
     )
+
+
+# ─── Clienti / Agenti ViewSets ────────────────────────────────────────────
+
+class ClienteViewSet(viewsets.ModelViewSet):
+    queryset = Cliente.objects.all()
+    serializer_class = ClienteSerializer
+    pagination_class = None
+
+
+class AgenteViewSet(viewsets.ModelViewSet):
+    queryset = Agente.objects.all()
+    serializer_class = AgenteSerializer
+    pagination_class = None
+
+
+# ─── Bottiglie disponibili per la creazione ordine ────────────────────────
+
+@api_view(['GET'])
+def bottiglie_disponibili(request):
+    """
+    Restituisce le bottiglie disponibili per la creazione di un ordine,
+    raggruppate per (tipologia_vino, ha_etichetta, ha_capsula).
+    Include solo righe con totale > 0.
+    """
+    lotti = (
+        LottoBottiglie.objects
+        .values(
+            'tipologia_vino__id',
+            'tipologia_vino__nome',
+            'tipologia_vino__famiglia__nome',
+            'ha_etichetta',
+            'ha_capsula',
+        )
+        .annotate(quantita_totale=Sum('quantita'))
+        .order_by(
+            'tipologia_vino__famiglia__nome', 'tipologia_vino__nome',
+            '-ha_etichetta', '-ha_capsula',
+        )
+    )
+    risultato = [
+        {
+            'tipologia_vino_id': l['tipologia_vino__id'],
+            'tipologia_vino_nome': l['tipologia_vino__nome'],
+            'famiglia_nome': l['tipologia_vino__famiglia__nome'],
+            'ha_etichetta': l['ha_etichetta'],
+            'ha_capsula': l['ha_capsula'],
+            'quantita_totale': l['quantita_totale'] or 0,
+        }
+        for l in lotti if (l['quantita_totale'] or 0) > 0
+    ]
+    return Response(risultato)
+
+
+# ─── Ordini: helper di scarico / ripristino ───────────────────────────────
+
+def _verifica_disponibilita_ordine(righe_bottiglie, righe_gadget):
+    """
+    Verifica la disponibilità per un set di righe (bottiglie + gadget).
+    Aggrega le richieste per chiave (tipologia, etichetta, capsula) e (gadget_id)
+    e confronta con la disponibilità totale in magazzino.
+    Ritorna lista errori (vuota se OK).
+    """
+    errori = []
+
+    # ---- Bottiglie: aggrega per (tipologia_id, ha_etichetta, ha_capsula) -
+    richiesta_bott = {}
+    for r in righe_bottiglie:
+        key = (r['tipologia_vino_id'], bool(r['ha_etichetta']), bool(r['ha_capsula']))
+        richiesta_bott[key] = richiesta_bott.get(key, 0) + int(r['quantita'])
+
+    for (tip_id, ha_eti, ha_cap), qty_richiesta in richiesta_bott.items():
+        disponibile = (
+            LottoBottiglie.objects
+            .filter(tipologia_vino_id=tip_id, ha_etichetta=ha_eti, ha_capsula=ha_cap)
+            .aggregate(t=Sum('quantita'))['t'] or 0
+        )
+        if disponibile < qty_richiesta:
+            try:
+                tip = TipologiaVino.objects.get(id=tip_id)
+                nome = str(tip)
+            except TipologiaVino.DoesNotExist:
+                nome = f"id={tip_id}"
+            eti = "etichettate" if ha_eti else "NON etichettate"
+            cap = "con capsula" if ha_cap else "senza capsula"
+            errori.append(
+                f"Bottiglie insufficienti per '{nome}' ({eti}, {cap}): "
+                f"richieste {qty_richiesta}, disponibili {disponibile}"
+            )
+
+    # ---- Gadget: aggrega per gadget_id ----------------------------------
+    richiesta_gad = {}
+    for r in righe_gadget:
+        gid = r['tipo_gadget_id']
+        richiesta_gad[gid] = richiesta_gad.get(gid, 0) + int(r['quantita'])
+
+    for gid, qty_richiesta in richiesta_gad.items():
+        try:
+            g = TipoGadget.objects.get(id=gid)
+        except TipoGadget.DoesNotExist:
+            errori.append(f"Gadget id={gid} non trovato")
+            continue
+        if g.quantita < qty_richiesta:
+            errori.append(
+                f"Gadget '{g.nome}' insufficiente: richiesti {qty_richiesta}, "
+                f"disponibili {g.quantita}"
+            )
+
+    return errori
+
+
+def _scala_bottiglie_per_ordine(tipologia_id, ha_etichetta, ha_capsula, quantita, ordine):
+    """
+    Scala N bottiglie dai lotti che hanno (tipologia, etichetta, capsula),
+    prendendo dai più vecchi (FIFO). Elimina i lotti che si svuotano.
+    """
+    rimanenti = quantita
+    lotti = (
+        LottoBottiglie.objects
+        .filter(
+            tipologia_vino_id=tipologia_id,
+            ha_etichetta=ha_etichetta, ha_capsula=ha_capsula,
+        )
+        .order_by('data_creazione')
+    )
+    for lotto in lotti:
+        if rimanenti <= 0:
+            break
+        da_prendere = min(rimanenti, lotto.quantita)
+        lotto.quantita -= da_prendere
+        if lotto.quantita == 0:
+            lotto.delete()
+        else:
+            lotto.save(update_fields=['quantita', 'data_aggiornamento'])
+        rimanenti -= da_prendere
+
+    if rimanenti > 0:
+        # Sicurezza, non dovrebbe accadere se la verifica è stata fatta
+        raise ValueError(f"Disponibilità lotti insufficiente per ordine #{ordine.numero}")
+
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ORDINE_SCARICO,
+        categoria=MovimentoMagazzino.Categoria.BOTTIGLIA,
+        quantita=quantita,
+        descrizione=(
+            f"Ordine #{ordine.numero}: scarico {quantita} bott. tipologia id={tipologia_id} "
+            f"(eti={ha_etichetta}, cap={ha_capsula})"
+        ),
+        riferimento_id=ordine.id,
+        riferimento_tipo='Ordine',
+    )
+
+
+def _ripristina_bottiglie_da_ordine(tipologia, ha_etichetta, ha_capsula, quantita, ordine):
+    """
+    Rimette nel lotto corrispondente (o ne crea uno nuovo) N bottiglie.
+    """
+    stato = (
+        LottoBottiglie.Stato.COMPLETA if ha_etichetta
+        else LottoBottiglie.Stato.SENZA_ETICHETTA
+    )
+    lotto = LottoBottiglie.objects.filter(
+        tipologia_vino=tipologia,
+        ha_etichetta=ha_etichetta,
+        ha_capsula=ha_capsula,
+        stato=stato,
+    ).first()
+    if lotto:
+        lotto.quantita += quantita
+        lotto.save(update_fields=['quantita', 'data_aggiornamento'])
+    else:
+        LottoBottiglie.objects.create(
+            tipologia_vino=tipologia,
+            quantita=quantita,
+            stato=stato,
+            ha_etichetta=ha_etichetta,
+            ha_capsula=ha_capsula,
+        )
+
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ORDINE_RIPRISTINO,
+        categoria=MovimentoMagazzino.Categoria.BOTTIGLIA,
+        quantita=quantita,
+        descrizione=(
+            f"Annullamento ordine #{ordine.numero}: ripristino {quantita} bott. {tipologia} "
+            f"(eti={ha_etichetta}, cap={ha_capsula})"
+        ),
+        riferimento_id=ordine.id,
+        riferimento_tipo='Ordine',
+    )
+
+
+def _scala_gadget_per_ordine(tipo_gadget, quantita, ordine):
+    tipo_gadget.quantita -= quantita
+    tipo_gadget.save(update_fields=['quantita'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ORDINE_SCARICO,
+        categoria=MovimentoMagazzino.Categoria.GADGET,
+        quantita=quantita,
+        descrizione=f"Ordine #{ordine.numero}: scarico {quantita}× gadget '{tipo_gadget.nome}'",
+        riferimento_id=ordine.id,
+        riferimento_tipo='Ordine',
+    )
+
+
+def _ripristina_gadget_da_ordine(tipo_gadget, quantita, ordine):
+    tipo_gadget.quantita += quantita
+    tipo_gadget.save(update_fields=['quantita'])
+    MovimentoMagazzino.objects.create(
+        tipo=MovimentoMagazzino.TipoMovimento.ORDINE_RIPRISTINO,
+        categoria=MovimentoMagazzino.Categoria.GADGET,
+        quantita=quantita,
+        descrizione=f"Annullamento ordine #{ordine.numero}: ripristino {quantita}× gadget '{tipo_gadget.nome}'",
+        riferimento_id=ordine.id,
+        riferimento_tipo='Ordine',
+    )
+
+
+def _applica_scarico_ordine(ordine):
+    """Per ogni riga dell'ordine, scala le quantità dal magazzino."""
+    for r in ordine.righe_bottiglie.all():
+        _scala_bottiglie_per_ordine(
+            r.tipologia_vino_id, r.ha_etichetta, r.ha_capsula, r.quantita, ordine
+        )
+    for r in ordine.righe_gadget.select_related('tipo_gadget').all():
+        _scala_gadget_per_ordine(r.tipo_gadget, r.quantita, ordine)
+
+
+def _applica_ripristino_ordine(ordine):
+    """Per ogni riga dell'ordine, rimette in magazzino."""
+    for r in ordine.righe_bottiglie.select_related('tipologia_vino').all():
+        _ripristina_bottiglie_da_ordine(
+            r.tipologia_vino, r.ha_etichetta, r.ha_capsula, r.quantita, ordine
+        )
+    for r in ordine.righe_gadget.select_related('tipo_gadget').all():
+        _ripristina_gadget_da_ordine(r.tipo_gadget, r.quantita, ordine)
+
+
+# ─── Ordini ViewSet ───────────────────────────────────────────────────────
+
+class OrdineViewSet(viewsets.ModelViewSet):
+    """
+    CRUD ordini:
+    - list / retrieve: serializzazione completa con righe e totali
+    - create: richiede righe_bottiglie + righe_gadget, scala magazzino
+    - partial_update (PATCH): aggiorna campi (sconto, IVA, tracking, flag, agente, note);
+        se sono passate righe_bottiglie / righe_gadget, ricostruisce le righe ripristinando
+        il magazzino e riscalando le nuove (solo se l'ordine è CONFERMATO).
+    - destroy: elimina l'ordine; se CONFERMATO ripristina il magazzino.
+    - POST /api/ordini/{id}/annulla/: ANNULLA l'ordine e ripristina magazzino.
+    - POST /api/ordini/{id}/ripristina/: riporta CONFERMATO un ordine ANNULLATO (riscalando).
+    """
+    queryset = Ordine.objects.select_related('cliente', 'agente').prefetch_related(
+        'righe_bottiglie__tipologia_vino__famiglia',
+        'righe_gadget__tipo_gadget',
+    ).all()
+    serializer_class = OrdineSerializer
+    filterset_fields = ['stato', 'cliente', 'agente', 'pacco_arrivato', 'fattura_pagata']
+
+    # ---- Create -----------------------------------------------------------
+
+    def create(self, request, *args, **kwargs):
+        ser = OrdineCreateSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = ser.validated_data
+
+        # Verifica cliente / agente
+        try:
+            cliente = Cliente.objects.get(id=d['cliente_id'])
+        except Cliente.DoesNotExist:
+            return Response({'error': 'Cliente non trovato'}, status=404)
+
+        agente = None
+        if d.get('agente_id'):
+            try:
+                agente = Agente.objects.get(id=d['agente_id'])
+            except Agente.DoesNotExist:
+                return Response({'error': 'Agente non trovato'}, status=404)
+
+        # Verifica disponibilità magazzino
+        errori = _verifica_disponibilita_ordine(d['righe_bottiglie'], d.get('righe_gadget') or [])
+        if errori:
+            return Response({'errors': errori}, status=400)
+
+        with transaction.atomic():
+            ordine = Ordine.objects.create(
+                cliente=cliente,
+                agente=agente,
+                sconto_percentuale=d.get('sconto_percentuale') or Decimal('0'),
+                aliquota_iva=d.get('aliquota_iva') or Decimal('22'),
+                tracking_number=d.get('tracking_number') or '',
+                pacco_arrivato=d.get('pacco_arrivato') or False,
+                fattura_pagata=d.get('fattura_pagata') or False,
+                stato=Ordine.Stato.CONFERMATO,
+                note=d.get('note') or '',
+            )
+
+            for r in d['righe_bottiglie']:
+                RigaOrdineBottiglia.objects.create(
+                    ordine=ordine,
+                    tipologia_vino_id=r['tipologia_vino_id'],
+                    ha_etichetta=r['ha_etichetta'],
+                    ha_capsula=r['ha_capsula'],
+                    quantita=r['quantita'],
+                    prezzo_unitario=r['prezzo_unitario'],
+                )
+
+            for r in (d.get('righe_gadget') or []):
+                RigaOrdineGadget.objects.create(
+                    ordine=ordine,
+                    tipo_gadget_id=r['tipo_gadget_id'],
+                    quantita=r['quantita'],
+                )
+
+            _applica_scarico_ordine(ordine)
+
+        ordine.refresh_from_db()
+        return Response(OrdineSerializer(ordine).data, status=201)
+
+    # ---- Update -----------------------------------------------------------
+
+    def update(self, request, *args, **kwargs):
+        # PUT non supportato: usare PATCH (partial_update)
+        return self.partial_update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        """
+        Aggiorna l'ordine.
+
+        - Campi semplici (sconto, IVA, tracking, flag, agente, note): sempre modificabili.
+        - 'cliente_id': modificabile (ricollega).
+        - Se vengono passate 'righe_bottiglie' o 'righe_gadget' e l'ordine è CONFERMATO,
+          ricostruisce le righe ripristinando il magazzino e riscalando le nuove.
+          Se è ANNULLATO, modifica solo le righe in tabella (senza toccare il magazzino).
+        """
+        ordine = self.get_object()
+        data = request.data
+        ricostruisci_righe = 'righe_bottiglie' in data or 'righe_gadget' in data
+
+        with transaction.atomic():
+            # ---- Campi semplici ---------------------------------------
+            if 'cliente_id' in data and data['cliente_id'] is not None:
+                try:
+                    ordine.cliente = Cliente.objects.get(id=data['cliente_id'])
+                except Cliente.DoesNotExist:
+                    return Response({'error': 'Cliente non trovato'}, status=404)
+
+            if 'agente_id' in data:
+                if data['agente_id'] in (None, ''):
+                    ordine.agente = None
+                else:
+                    try:
+                        ordine.agente = Agente.objects.get(id=data['agente_id'])
+                    except Agente.DoesNotExist:
+                        return Response({'error': 'Agente non trovato'}, status=404)
+
+            for campo in ['sconto_percentuale', 'aliquota_iva', 'tracking_number',
+                          'pacco_arrivato', 'fattura_pagata', 'note']:
+                if campo in data:
+                    setattr(ordine, campo, data[campo])
+
+            # ---- Ricostruzione righe ----------------------------------
+            if ricostruisci_righe:
+                nuove_bott = data.get(
+                    'righe_bottiglie',
+                    list(ordine.righe_bottiglie.values(
+                        'tipologia_vino_id', 'ha_etichetta', 'ha_capsula',
+                        'quantita', 'prezzo_unitario',
+                    ))
+                )
+                nuove_gad = data.get(
+                    'righe_gadget',
+                    list(ordine.righe_gadget.values('tipo_gadget_id', 'quantita'))
+                )
+
+                # Normalizza tipi
+                nuove_bott_norm = []
+                for r in nuove_bott:
+                    nuove_bott_norm.append({
+                        'tipologia_vino_id': int(r.get('tipologia_vino_id') or r.get('tipologia_vino')),
+                        'ha_etichetta': bool(r.get('ha_etichetta', True)),
+                        'ha_capsula': bool(r.get('ha_capsula', True)),
+                        'quantita': int(r['quantita']),
+                        'prezzo_unitario': Decimal(str(r['prezzo_unitario'])),
+                    })
+                nuove_gad_norm = []
+                for r in nuove_gad:
+                    nuove_gad_norm.append({
+                        'tipo_gadget_id': int(r.get('tipo_gadget_id') or r.get('tipo_gadget')),
+                        'quantita': int(r['quantita']),
+                    })
+
+                if not nuove_bott_norm:
+                    return Response(
+                        {'error': "L'ordine deve contenere almeno una bottiglia."},
+                        status=400,
+                    )
+
+                if ordine.stato == Ordine.Stato.CONFERMATO:
+                    # Calcola DELTA per evitare di toccare temporaneamente il magazzino:
+                    # disponibilità_effettiva = giacenza_attuale + scarico_originale - nuovo_scarico
+                    # Per semplicità: ripristina vecchio, verifica e scala nuovo.
+                    # Per evitare race, facciamo tutto in transazione.
+                    _applica_ripristino_ordine(ordine)
+
+                    # Elimina righe vecchie
+                    ordine.righe_bottiglie.all().delete()
+                    ordine.righe_gadget.all().delete()
+
+                    # Verifica disponibilità per le nuove
+                    errori = _verifica_disponibilita_ordine(nuove_bott_norm, nuove_gad_norm)
+                    if errori:
+                        # Rollback automatico via transaction
+                        from rest_framework.exceptions import ValidationError
+                        raise ValidationError({'errors': errori})
+
+                    # Crea nuove righe e scala
+                    for r in nuove_bott_norm:
+                        RigaOrdineBottiglia.objects.create(
+                            ordine=ordine,
+                            tipologia_vino_id=r['tipologia_vino_id'],
+                            ha_etichetta=r['ha_etichetta'],
+                            ha_capsula=r['ha_capsula'],
+                            quantita=r['quantita'],
+                            prezzo_unitario=r['prezzo_unitario'],
+                        )
+                    for r in nuove_gad_norm:
+                        RigaOrdineGadget.objects.create(
+                            ordine=ordine,
+                            tipo_gadget_id=r['tipo_gadget_id'],
+                            quantita=r['quantita'],
+                        )
+                    _applica_scarico_ordine(ordine)
+                else:
+                    # ANNULLATO: aggiorna solo i dati senza toccare il magazzino
+                    ordine.righe_bottiglie.all().delete()
+                    ordine.righe_gadget.all().delete()
+                    for r in nuove_bott_norm:
+                        RigaOrdineBottiglia.objects.create(
+                            ordine=ordine,
+                            tipologia_vino_id=r['tipologia_vino_id'],
+                            ha_etichetta=r['ha_etichetta'],
+                            ha_capsula=r['ha_capsula'],
+                            quantita=r['quantita'],
+                            prezzo_unitario=r['prezzo_unitario'],
+                        )
+                    for r in nuove_gad_norm:
+                        RigaOrdineGadget.objects.create(
+                            ordine=ordine,
+                            tipo_gadget_id=r['tipo_gadget_id'],
+                            quantita=r['quantita'],
+                        )
+
+            ordine.save()
+
+        ordine.refresh_from_db()
+        return Response(OrdineSerializer(ordine).data)
+
+    # ---- Destroy ---------------------------------------------------------
+
+    def destroy(self, request, *args, **kwargs):
+        """
+        Eliminazione fisica dell'ordine. Se è CONFERMATO ripristina il magazzino.
+        """
+        ordine = self.get_object()
+        with transaction.atomic():
+            if ordine.stato == Ordine.Stato.CONFERMATO:
+                _applica_ripristino_ordine(ordine)
+            ordine.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    # ---- Annulla / Ripristina --------------------------------------------
+
+    @action(detail=True, methods=['post'])
+    def annulla(self, request, pk=None):
+        """Annulla l'ordine: stato → ANNULLATO e ripristina il magazzino."""
+        ordine = self.get_object()
+        if ordine.stato == Ordine.Stato.ANNULLATO:
+            return Response({'error': 'Ordine già annullato'}, status=400)
+
+        with transaction.atomic():
+            _applica_ripristino_ordine(ordine)
+            ordine.stato = Ordine.Stato.ANNULLATO
+            ordine.data_annullamento = timezone.now()
+            ordine.save(update_fields=['stato', 'data_annullamento'])
+
+        ordine.refresh_from_db()
+        return Response(OrdineSerializer(ordine).data)
+
+    @action(detail=True, methods=['post'])
+    def ripristina(self, request, pk=None):
+        """Riporta un ordine ANNULLATO a CONFERMATO, riscalando il magazzino."""
+        ordine = self.get_object()
+        if ordine.stato == Ordine.Stato.CONFERMATO:
+            return Response({'error': 'Ordine già confermato'}, status=400)
+
+        # Verifica disponibilità con le righe attuali
+        righe_bott = list(ordine.righe_bottiglie.values(
+            'tipologia_vino_id', 'ha_etichetta', 'ha_capsula', 'quantita'
+        ))
+        righe_bott_for_check = [
+            {
+                'tipologia_vino_id': r['tipologia_vino_id'],
+                'ha_etichetta': r['ha_etichetta'],
+                'ha_capsula': r['ha_capsula'],
+                'quantita': r['quantita'],
+            } for r in righe_bott
+        ]
+        righe_gad = list(ordine.righe_gadget.values('tipo_gadget_id', 'quantita'))
+        errori = _verifica_disponibilita_ordine(righe_bott_for_check, righe_gad)
+        if errori:
+            return Response({'errors': errori}, status=400)
+
+        with transaction.atomic():
+            _applica_scarico_ordine(ordine)
+            ordine.stato = Ordine.Stato.CONFERMATO
+            ordine.data_annullamento = None
+            ordine.save(update_fields=['stato', 'data_annullamento'])
+
+        ordine.refresh_from_db()
+        return Response(OrdineSerializer(ordine).data)
+

@@ -1,3 +1,4 @@
+from decimal import Decimal
 from django.db import models
 from django.core.validators import MinValueValidator
 
@@ -210,6 +211,8 @@ class MovimentoMagazzino(models.Model):
         SCARICO = 'SCARICO', 'Scarico (imbottigliamento)'
         AGGIUNTA_VINO = 'AGGIUNTA_VINO', 'Aggiunta vino al silos'
         ANNULLAMENTO = 'ANNULLAMENTO', 'Annullamento operazione'
+        ORDINE_SCARICO = 'ORDINE_SCARICO', 'Scarico per ordine'
+        ORDINE_RIPRISTINO = 'ORDINE_RIPRISTINO', 'Ripristino per annullamento ordine'
 
     class Categoria(models.TextChoices):
         TAPPO = 'TAPPO', 'Tappo'
@@ -287,3 +290,173 @@ class OperazioneImbottigliamento(models.Model):
 
     def __str__(self):
         return f"{self.get_tipo_display()} × {self.quantita} — {self.tipologia_vino} ({self.get_stato_display()})"
+
+
+# ─── ANAGRAFICHE: Clienti e Agenti ────────────────────────────────────────
+
+class Cliente(models.Model):
+    """Anagrafica cliente (azienda o privato)."""
+    nome = models.CharField(max_length=200, help_text="Nome referente / privato")
+    azienda = models.CharField(max_length=200, blank=True, default='')
+    via = models.CharField(max_length=300, blank=True, default='', help_text="Indirizzo completo")
+    partita_iva = models.CharField(max_length=30, blank=True, default='')
+    telefono = models.CharField(max_length=30, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "Clienti"
+        ordering = ['azienda', 'nome']
+
+    def __str__(self):
+        if self.azienda:
+            return f"{self.azienda} — {self.nome}"
+        return self.nome
+
+
+class Agente(models.Model):
+    """Anagrafica agente/rappresentante associabile a un ordine."""
+    nome = models.CharField(max_length=120)
+    cognome = models.CharField(max_length=120)
+    telefono = models.CharField(max_length=30, blank=True, default='')
+    email = models.EmailField(blank=True, default='')
+    note = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name_plural = "Agenti"
+        ordering = ['cognome', 'nome']
+
+    def __str__(self):
+        return f"{self.cognome} {self.nome}"
+
+
+# ─── ORDINI ───────────────────────────────────────────────────────────────
+
+class Ordine(models.Model):
+    """
+    Ordine cliente. Quando in stato CONFERMATO scarica dal magazzino bottiglie
+    e gadget. Se ANNULLATO ripristina le quantità.
+    """
+
+    class Stato(models.TextChoices):
+        CONFERMATO = 'CONFERMATO', 'Confermato'
+        ANNULLATO = 'ANNULLATO', 'Annullato'
+
+    numero = models.PositiveIntegerField(unique=True, editable=False)
+    data = models.DateTimeField(auto_now_add=True)
+    data_aggiornamento = models.DateTimeField(auto_now=True)
+
+    cliente = models.ForeignKey(
+        Cliente, on_delete=models.PROTECT, related_name='ordini'
+    )
+    agente = models.ForeignKey(
+        Agente, on_delete=models.SET_NULL, null=True, blank=True, related_name='ordini'
+    )
+
+    sconto_percentuale = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('0'),
+        validators=[MinValueValidator(0)],
+        help_text="Sconto applicato sul totale (es: 10 = 10%)"
+    )
+    aliquota_iva = models.DecimalField(
+        max_digits=5, decimal_places=2, default=Decimal('22'),
+        validators=[MinValueValidator(0)],
+        help_text="Aliquota IVA in percentuale (es: 22 = 22%)"
+    )
+
+    tracking_number = models.CharField(max_length=100, blank=True, default='')
+    pacco_arrivato = models.BooleanField(default=False)
+    fattura_pagata = models.BooleanField(default=False)
+
+    stato = models.CharField(max_length=20, choices=Stato.choices, default=Stato.CONFERMATO)
+    data_annullamento = models.DateTimeField(null=True, blank=True)
+
+    note = models.TextField(blank=True, default='')
+
+    class Meta:
+        verbose_name_plural = "Ordini"
+        ordering = ['-data']
+
+    def __str__(self):
+        return f"Ordine #{self.numero} — {self.cliente}"
+
+    def save(self, *args, **kwargs):
+        if not self.pk and not self.numero:
+            last = Ordine.objects.order_by('-numero').first()
+            self.numero = (last.numero + 1) if last else 1
+        super().save(*args, **kwargs)
+
+    # --- Calcoli totali (proprietà a runtime) -----------------------------
+
+    @property
+    def imponibile_lordo(self):
+        """Somma dei subtotali delle righe bottiglie (prezzo × quantità), senza sconto e senza IVA."""
+        totale = Decimal('0')
+        for riga in self.righe_bottiglie.all():
+            totale += riga.subtotale
+        return totale
+
+    @property
+    def importo_sconto(self):
+        return (self.imponibile_lordo * self.sconto_percentuale / Decimal('100')).quantize(Decimal('0.01'))
+
+    @property
+    def imponibile_netto(self):
+        """Imponibile dopo lo sconto, senza IVA."""
+        return (self.imponibile_lordo - self.importo_sconto).quantize(Decimal('0.01'))
+
+    @property
+    def importo_iva(self):
+        return (self.imponibile_netto * self.aliquota_iva / Decimal('100')).quantize(Decimal('0.01'))
+
+    @property
+    def totale(self):
+        """Totale finale IVA inclusa."""
+        return (self.imponibile_netto + self.importo_iva).quantize(Decimal('0.01'))
+
+
+class RigaOrdineBottiglia(models.Model):
+    """Riga di un ordine relativa a un tipo di bottiglia (vino completo)."""
+    ordine = models.ForeignKey(
+        Ordine, on_delete=models.CASCADE, related_name='righe_bottiglie'
+    )
+    tipologia_vino = models.ForeignKey(
+        TipologiaVino, on_delete=models.PROTECT, related_name='+'
+    )
+    ha_etichetta = models.BooleanField(default=True)
+    ha_capsula = models.BooleanField(default=True)
+    quantita = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+    prezzo_unitario = models.DecimalField(
+        max_digits=10, decimal_places=2,
+        validators=[MinValueValidator(Decimal('0'))]
+    )
+
+    class Meta:
+        verbose_name_plural = "Righe ordine bottiglie"
+
+    def __str__(self):
+        eti = "etichettata" if self.ha_etichetta else "non etichettata"
+        return f"{self.tipologia_vino} ({eti}) × {self.quantita}"
+
+    @property
+    def subtotale(self):
+        return (Decimal(self.quantita) * self.prezzo_unitario).quantize(Decimal('0.01'))
+
+
+class RigaOrdineGadget(models.Model):
+    """Riga di un ordine relativa a un gadget omaggio (no prezzo)."""
+    ordine = models.ForeignKey(
+        Ordine, on_delete=models.CASCADE, related_name='righe_gadget'
+    )
+    tipo_gadget = models.ForeignKey(
+        TipoGadget, on_delete=models.PROTECT, related_name='+'
+    )
+    quantita = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+
+    class Meta:
+        verbose_name_plural = "Righe ordine gadget"
+
+    def __str__(self):
+        return f"{self.tipo_gadget} × {self.quantita}"

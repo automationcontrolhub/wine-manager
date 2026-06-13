@@ -15,6 +15,9 @@ router.register(r'tipologie-vino', views.TipologiaVinoViewSet)
 router.register(r'lotti', views.LottoBottiglieViewSet)
 router.register(r'movimenti', views.MovimentoMagazzinoViewSet)
 router.register(r'operazioni', views.OperazioneImbottigliamentoViewSet)
+router.register(r'clienti', views.ClienteViewSet)
+router.register(r'agenti', views.AgenteViewSet)
+router.register(r'ordini', views.OrdineViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
@@ -25,5 +28,7 @@ urlpatterns = [
     path('crea-con-etichetta/', views.crea_bottiglie_con_etichetta),
     path('associa-etichetta/', views.associa_etichetta),
     path('bottiglie-senza-etichetta/', views.bottiglie_senza_etichetta),
+    path('bottiglie-disponibili/', views.bottiglie_disponibili),
     path('operazioni/<int:pk>/annulla/', views.annulla_operazione),
 ]
+

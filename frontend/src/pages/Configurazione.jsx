@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
-import { Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck, Grape, Edit3, Gift } from 'lucide-react';
+import {
+  Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck,
+  Grape, Edit3, Gift, Users, UserCog,
+} from 'lucide-react';
 import Modal from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipoCartone, tipoTappo, tipoBottiglia,
   tipoEtichetta, tipoCapsula, tipoCestello, tipoGadget,
+  clienti, agenti,
 } from '../api/client';
 
 const SEZIONI = [
@@ -57,6 +61,35 @@ const SEZIONI = [
     colonne: ['nome', 'quantita'],
     colonneLabel: ['Nome', 'Scorta'],
   },
+  // ── Anagrafiche ──────────────────────────────────────────────────────
+  {
+    key: 'cliente', label: 'Clienti', icon: Users, api: clienti, isAnagrafica: true,
+    campi: [
+      { name: 'azienda', label: 'Azienda', type: 'text' },
+      { name: 'nome', label: 'Nome / Referente', type: 'text', required: true },
+      { name: 'via', label: 'Indirizzo (Via, città, CAP)', type: 'text' },
+      { name: 'partita_iva', label: 'Partita IVA', type: 'text' },
+      { name: 'telefono', label: 'Telefono', type: 'tel' },
+      { name: 'email', label: 'Email', type: 'email' },
+      { name: 'note', label: 'Note', type: 'textarea' },
+    ],
+    colonne: ['azienda', 'nome', 'partita_iva', 'telefono'],
+    colonneLabel: ['Azienda', 'Nome', 'P. IVA', 'Telefono'],
+    singolare: 'cliente',
+  },
+  {
+    key: 'agente', label: 'Agenti', icon: UserCog, api: agenti, isAnagrafica: true,
+    campi: [
+      { name: 'nome', label: 'Nome', type: 'text', required: true },
+      { name: 'cognome', label: 'Cognome', type: 'text', required: true },
+      { name: 'telefono', label: 'Telefono', type: 'tel' },
+      { name: 'email', label: 'Email', type: 'email' },
+      { name: 'note', label: 'Note', type: 'textarea' },
+    ],
+    colonne: ['cognome', 'nome', 'telefono', 'email'],
+    colonneLabel: ['Cognome', 'Nome', 'Telefono', 'Email'],
+    singolare: 'agente',
+  },
 ];
 
 export default function Configurazione() {
@@ -74,7 +107,7 @@ export default function Configurazione() {
     for (const sez of SEZIONI) {
       try {
         const res = await sez.api.list();
-        results[sez.key] = Array.isArray(res) ? res : [];
+        results[sez.key] = Array.isArray(res) ? res : (res.results || []);
       } catch {
         results[sez.key] = [];
       }
@@ -97,7 +130,7 @@ export default function Configurazione() {
     setEditingId(item.id);
     const initialForm = {};
     currentSection.campi.forEach(c => {
-      initialForm[c.name] = item[c.name];
+      initialForm[c.name] = item[c.name] ?? '';
     });
     setForm(initialForm);
     setShowModal(true);
@@ -108,10 +141,10 @@ export default function Configurazione() {
     try {
       if (editingId) {
         await currentSection.api.update(editingId, form);
-        toast.success(`${currentSection.label.slice(0, -1)} aggiornato!`);
+        toast.success(`${labelSingolare(currentSection)} aggiornato!`);
       } else {
         await currentSection.api.create(form);
-        toast.success(`${currentSection.label.slice(0, -1)} creato!`);
+        toast.success(`${labelSingolare(currentSection)} creato!`);
       }
       setShowModal(false);
       setForm({});
@@ -124,9 +157,11 @@ export default function Configurazione() {
   };
 
   const handleDelete = async (item) => {
+    const sing = labelSingolare(currentSection);
+    const nomeItem = item.nome || item.azienda || `#${item.id}`;
     const ok = await confirm({
-      title: 'Conferma eliminazione',
-      message: `Stai per eliminare "${item.nome}". Questa azione non può essere annullata.\n\nNota: l'eliminazione fallirà se è in uso da una tipologia di vino.`,
+      title: `Elimina ${sing}`,
+      message: `Stai per eliminare "${nomeItem}". Questa azione non può essere annullata.\n\nNota: l'eliminazione fallirà se è in uso (es: cliente con ordini, agente associato a ordini).`,
       confirmLabel: 'Elimina',
       variant: 'danger',
     });
@@ -135,8 +170,8 @@ export default function Configurazione() {
       await currentSection.api.delete(item.id);
       toast.success('Eliminato!');
       loadAll();
-    } catch (e) {
-      toast.error('Impossibile eliminare: potrebbe essere in uso da una tipologia di vino.');
+    } catch {
+      toast.error("Impossibile eliminare: potrebbe essere in uso (ad esempio in un ordine o in una tipologia di vino).");
     }
   };
 
@@ -148,6 +183,10 @@ export default function Configurazione() {
 
   const items = data[activeTab] || [];
 
+  // Raggruppamento tab per le due sezioni
+  const tabsMateriali = SEZIONI.filter(s => !s.isAnagrafica);
+  const tabsAnagrafica = SEZIONI.filter(s => s.isAnagrafica);
+
   return (
     <div className="space-y-6">
       <div>
@@ -155,34 +194,34 @@ export default function Configurazione() {
           <Settings className="w-8 h-8 text-bark-400" />
           Configurazione
         </h1>
-        <p className="text-bark-500">Gestisci le tipologie di materiali</p>
+        <p className="text-bark-500">Gestisci tipologie di materiali, clienti e agenti</p>
       </div>
 
-      <div className="flex gap-1 bg-bark-100 rounded-xl p-1 flex-wrap">
-        {SEZIONI.map(sez => {
-          const Icon = sez.icon;
-          return (
-            <button
-              key={sez.key}
-              onClick={() => setActiveTab(sez.key)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200
-                ${activeTab === sez.key
-                  ? 'bg-white text-bark-900 shadow-sm'
-                  : 'text-bark-500 hover:text-bark-700'
-                }`}
-            >
-              <Icon className="w-4 h-4" />
-              {sez.label}
-              <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-                activeTab === sez.key ? 'bg-bark-100 text-bark-600' : 'bg-bark-200/50 text-bark-400'
-              }`}>
-                {(data[sez.key] || []).length}
-              </span>
-            </button>
-          );
-        })}
+      {/* Tabs materiali */}
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-bark-500 mb-2">Materiali</p>
+        <div className="flex gap-1 bg-bark-100 rounded-xl p-1 flex-wrap">
+          {tabsMateriali.map(sez => (
+            <TabButton key={sez.key} sez={sez} active={activeTab === sez.key}
+              count={(data[sez.key] || []).length}
+              onClick={() => setActiveTab(sez.key)} />
+          ))}
+        </div>
       </div>
 
+      {/* Tabs anagrafica */}
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-bark-500 mb-2">Anagrafica</p>
+        <div className="flex gap-1 bg-bark-100 rounded-xl p-1 flex-wrap">
+          {tabsAnagrafica.map(sez => (
+            <TabButton key={sez.key} sez={sez} active={activeTab === sez.key}
+              count={(data[sez.key] || []).length}
+              onClick={() => setActiveTab(sez.key)} />
+          ))}
+        </div>
+      </div>
+
+      {/* Contenuto sezione attiva */}
       <div className="card animate-fade-in">
         <div className="flex items-center justify-between mb-4">
           <h2 className="section-title mb-0 flex items-center gap-2">
@@ -190,15 +229,22 @@ export default function Configurazione() {
             {currentSection.label}
           </h2>
           <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" /> Aggiungi
+            <Plus className="w-4 h-4" />
+            {currentSection.isAnagrafica ? `Nuovo ${labelSingolare(currentSection)}` : 'Aggiungi'}
           </button>
         </div>
 
         {items.length === 0 ? (
           <div className="text-center py-8">
             {React.createElement(currentSection.icon, { className: 'w-12 h-12 text-bark-300 mx-auto mb-3' })}
-            <p className="text-bark-500">Nessun tipo di {currentSection.label.toLowerCase()} configurato.</p>
-            <p className="text-bark-400 text-sm mt-1">Clicca "Aggiungi" per crearne uno.</p>
+            <p className="text-bark-500">
+              {currentSection.isAnagrafica
+                ? `Nessun ${labelSingolare(currentSection)} configurato.`
+                : `Nessun tipo di ${currentSection.label.toLowerCase()} configurato.`}
+            </p>
+            <p className="text-bark-400 text-sm mt-1">
+              Clicca "{currentSection.isAnagrafica ? `Nuovo ${labelSingolare(currentSection)}` : 'Aggiungi'}" per crearne uno.
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -217,14 +263,14 @@ export default function Configurazione() {
                     {currentSection.colonne.map((col, i) => (
                       <td key={i} className={`table-cell ${
                         col === 'quantita' ? 'font-semibold' :
-                        col === 'nome' ? 'font-semibold text-bark-900' : ''
+                        (col === 'nome' || col === 'azienda' || col === 'cognome') ? 'font-semibold text-bark-900' : ''
                       }`}>
                         {col === 'quantita' ? (
                           <span className={item[col] > 0 ? 'text-olive-700' : 'text-red-500'}>
                             {item[col]?.toLocaleString('it-IT')}
                           </span>
                         ) : (
-                          item[col]
+                          item[col] || <span className="text-bark-300">—</span>
                         )}
                       </td>
                     ))}
@@ -251,24 +297,38 @@ export default function Configurazione() {
       </div>
 
       <Modal open={showModal} onClose={() => setShowModal(false)}
+        wide={currentSection?.isAnagrafica}
         title={editingId
-          ? `Modifica ${currentSection?.label.toLowerCase().slice(0, -1) || ''}`
-          : `Nuovo tipo di ${currentSection?.label.toLowerCase().slice(0, -1) || ''}`}>
+          ? `Modifica ${labelSingolare(currentSection)}`
+          : currentSection?.isAnagrafica
+            ? `Nuovo ${labelSingolare(currentSection)}`
+            : `Nuovo tipo di ${labelSingolare(currentSection)}`}>
         <form onSubmit={handleSubmit} className="space-y-4">
-          {currentSection?.campi.map(campo => (
-            <div key={campo.name}>
-              <label className="label">{campo.label}</label>
-              <input
-                type={campo.type}
-                step={campo.step}
-                required={campo.required}
-                className="input-field"
-                placeholder={campo.label}
-                value={form[campo.name] ?? ''}
-                onChange={e => setForm({...form, [campo.name]: e.target.value})}
-              />
-            </div>
-          ))}
+          <div className={currentSection?.isAnagrafica ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-4'}>
+            {currentSection?.campi.map(campo => (
+              <div key={campo.name} className={campo.type === 'textarea' ? 'sm:col-span-2' : ''}>
+                <label className="label">{campo.label}{campo.required && ' *'}</label>
+                {campo.type === 'textarea' ? (
+                  <textarea
+                    className="input-field min-h-[80px]"
+                    placeholder={campo.label}
+                    value={form[campo.name] ?? ''}
+                    onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
+                  />
+                ) : (
+                  <input
+                    type={campo.type}
+                    step={campo.step}
+                    required={campo.required}
+                    className="input-field"
+                    placeholder={campo.label}
+                    value={form[campo.name] ?? ''}
+                    onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
+                  />
+                )}
+              </div>
+            ))}
+          </div>
           <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
             <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
             <button type="submit" className="btn-primary">
@@ -278,5 +338,36 @@ export default function Configurazione() {
         </form>
       </Modal>
     </div>
+  );
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────
+
+function labelSingolare(sez) {
+  if (!sez) return '';
+  if (sez.singolare) return sez.singolare;
+  // Default: rimuovo la "i" finale per i materiali (Cartoni → Cartone)
+  return sez.label.toLowerCase().replace(/i$/, 'o').replace(/e$/, 'a');
+}
+
+function TabButton({ sez, active, count, onClick }) {
+  const Icon = sez.icon;
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-200
+        ${active
+          ? 'bg-white text-bark-900 shadow-sm'
+          : 'text-bark-500 hover:text-bark-700'
+        }`}
+    >
+      <Icon className="w-4 h-4" />
+      {sez.label}
+      <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+        active ? 'bg-bark-100 text-bark-600' : 'bg-bark-200/50 text-bark-400'
+      }`}>
+        {count}
+      </span>
+    </button>
   );
 }

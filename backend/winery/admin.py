@@ -3,6 +3,7 @@ from .models import (
     TipoCartone, TipoTappo, TipoBottiglia, TipoEtichetta,
     TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
+    Cliente, Agente, Ordine, RigaOrdineBottiglia, RigaOrdineGadget,
 )
 
 @admin.register(TipoCartone)
@@ -56,3 +57,35 @@ class MovimentoMagazzinoAdmin(admin.ModelAdmin):
 class OperazioneImbottigliamentoAdmin(admin.ModelAdmin):
     list_display = ['tipo', 'tipologia_vino', 'quantita', 'stato', 'data']
     list_filter = ['tipo', 'stato']
+
+
+@admin.register(Cliente)
+class ClienteAdmin(admin.ModelAdmin):
+    list_display = ['azienda', 'nome', 'partita_iva', 'telefono']
+    search_fields = ['azienda', 'nome', 'partita_iva']
+
+
+@admin.register(Agente)
+class AgenteAdmin(admin.ModelAdmin):
+    list_display = ['cognome', 'nome', 'telefono']
+    search_fields = ['cognome', 'nome']
+
+
+class RigaOrdineBottigliaInline(admin.TabularInline):
+    model = RigaOrdineBottiglia
+    extra = 0
+
+
+class RigaOrdineGadgetInline(admin.TabularInline):
+    model = RigaOrdineGadget
+    extra = 0
+
+
+@admin.register(Ordine)
+class OrdineAdmin(admin.ModelAdmin):
+    list_display = ['numero', 'data', 'cliente', 'agente', 'stato',
+                    'pacco_arrivato', 'fattura_pagata']
+    list_filter = ['stato', 'pacco_arrivato', 'fattura_pagata']
+    search_fields = ['numero', 'cliente__nome', 'cliente__azienda', 'tracking_number']
+    inlines = [RigaOrdineBottigliaInline, RigaOrdineGadgetInline]
+    readonly_fields = ['numero', 'data', 'data_aggiornamento', 'data_annullamento']

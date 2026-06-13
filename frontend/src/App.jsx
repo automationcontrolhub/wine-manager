@@ -3,13 +3,14 @@ import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-do
 import { Toaster } from 'react-hot-toast';
 import {
   LayoutDashboard, Wine, Warehouse, Package, Settings, GlassWater,
-  ChevronLeft, ChevronRight
+  ChevronLeft, ChevronRight, ShoppingCart,
 } from 'lucide-react';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import Dashboard from './pages/Dashboard';
 import TipologieVino from './pages/TipologieVino';
 import Magazzino from './pages/Magazzino';
 import Imbottigliamento from './pages/Imbottigliamento';
+import Ordini from './pages/Ordini';
 import Configurazione from './pages/Configurazione';
 
 const navItems = [
@@ -17,6 +18,7 @@ const navItems = [
   { to: '/tipologie', icon: Wine, label: 'Tipologie Vino' },
   { to: '/magazzino', icon: Warehouse, label: 'Magazzino' },
   { to: '/imbottigliamento', icon: Package, label: 'Imbottigliamento' },
+  { to: '/ordini', icon: ShoppingCart, label: 'Ordini' },
   { to: '/configurazione', icon: Settings, label: 'Configurazione' },
 ];
 
@@ -96,6 +98,7 @@ export default function App() {
                 <Route path="/tipologie" element={<TipologieVino />} />
                 <Route path="/magazzino" element={<Magazzino />} />
                 <Route path="/imbottigliamento" element={<Imbottigliamento />} />
+                <Route path="/ordini" element={<Ordini />} />
                 <Route path="/configurazione" element={<Configurazione />} />
               </Routes>
             </div>
