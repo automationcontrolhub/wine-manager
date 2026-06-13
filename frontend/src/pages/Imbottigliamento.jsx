@@ -9,6 +9,61 @@ import {
   operazioni as operazioniApi,
 } from '../api/client';
 
+// Definito fuori dal componente per evitare ricreazione ad ogni render
+function MaterialPreview({ tipologie, tipId, qty, conEtichetta, conCapsula }) {
+  const tip = tipologie.find(t => t.id === Number(tipId));
+  if (!tip || !qty) return null;
+  const q = Number(qty);
+  const cap = tip.tipo_bottiglia_capacita ? parseFloat(tip.tipo_bottiglia_capacita) : 0.75;
+  const litri = q * cap;
+  const cartoneCap = tip.tipo_cartone_capacita || 1;
+  const cartoniNecessari = Math.ceil(q / cartoneCap);
+
+  return (
+    <div className="bg-bark-50 rounded-xl p-4 mt-4 space-y-2 animate-fade-in">
+      <p className="text-sm font-bold text-bark-700 uppercase tracking-wider">Riepilogo materiali</p>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="flex justify-between p-2 rounded-lg bg-white">
+          <span className="text-bark-600">Vino dal silos</span>
+          <span className="font-semibold text-wine-700">{litri.toFixed(1)} L</span>
+        </div>
+        <div className="flex justify-between p-2 rounded-lg bg-white">
+          <span className="text-bark-600">Bottiglie ({tip.tipo_bottiglia_nome})</span>
+          <span className="font-semibold">{q}</span>
+        </div>
+        <div className="flex justify-between p-2 rounded-lg bg-white">
+          <span className="text-bark-600">Tappi ({tip.tipo_tappo_nome})</span>
+          <span className="font-semibold">{q}</span>
+        </div>
+        {conEtichetta && (
+          <div className="flex justify-between p-2 rounded-lg bg-white">
+            <span className="text-bark-600">Etichette ({tip.tipo_etichetta_nome})</span>
+            <span className="font-semibold">{q}</span>
+          </div>
+        )}
+        {conCapsula && (
+          <div className="flex justify-between p-2 rounded-lg bg-white">
+            <span className="text-bark-600">Capsule ({tip.tipo_capsula_nome})</span>
+            <span className="font-semibold">{q}</span>
+          </div>
+        )}
+        <div className="flex justify-between p-2 rounded-lg bg-white">
+          <span className="text-bark-600">
+            Cartoni ({tip.tipo_cartone_nome}, {cartoneCap}/cad)
+          </span>
+          <span className="font-semibold">{cartoniNecessari}</span>
+        </div>
+        {tip.famiglia_is_spumante && tip.tipo_cestello_nome && (
+          <div className="flex justify-between p-2 rounded-lg bg-white">
+            <span className="text-bark-600">Cestelli ({tip.tipo_cestello_nome})</span>
+            <span className="font-semibold">{q}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Imbottigliamento() {
   const confirm = useConfirm();
   const [tipologie, setTipologie] = useState([]);
@@ -52,62 +107,6 @@ export default function Imbottigliamento() {
   };
 
   useEffect(() => { loadAll(); }, []);
-
-  // Helper: mostra materiali che verranno usati
-  const MaterialPreview = ({ tipId, qty, conEtichetta, conCapsula }) => {
-    const tip = tipologie.find(t => t.id === Number(tipId));
-    if (!tip || !qty) return null;
-    const q = Number(qty);
-    const cap = tip.tipo_bottiglia_capacita ? parseFloat(tip.tipo_bottiglia_capacita) : 0.75;
-    const litri = q * cap;
-    // Capacità reale del cartone associato a questa tipologia
-    const cartoneCap = tip.tipo_cartone_capacita || 1;
-    const cartoniNecessari = Math.ceil(q / cartoneCap);
-
-    return (
-      <div className="bg-bark-50 rounded-xl p-4 mt-4 space-y-2 animate-fade-in">
-        <p className="text-sm font-bold text-bark-700 uppercase tracking-wider">Riepilogo materiali</p>
-        <div className="grid grid-cols-2 gap-2 text-sm">
-          <div className="flex justify-between p-2 rounded-lg bg-white">
-            <span className="text-bark-600">Vino dal silos</span>
-            <span className="font-semibold text-wine-700">{litri.toFixed(1)} L</span>
-          </div>
-          <div className="flex justify-between p-2 rounded-lg bg-white">
-            <span className="text-bark-600">Bottiglie ({tip.tipo_bottiglia_nome})</span>
-            <span className="font-semibold">{q}</span>
-          </div>
-          <div className="flex justify-between p-2 rounded-lg bg-white">
-            <span className="text-bark-600">Tappi ({tip.tipo_tappo_nome})</span>
-            <span className="font-semibold">{q}</span>
-          </div>
-          {conEtichetta && (
-            <div className="flex justify-between p-2 rounded-lg bg-white">
-              <span className="text-bark-600">Etichette ({tip.tipo_etichetta_nome})</span>
-              <span className="font-semibold">{q}</span>
-            </div>
-          )}
-          {conCapsula && (
-            <div className="flex justify-between p-2 rounded-lg bg-white">
-              <span className="text-bark-600">Capsule ({tip.tipo_capsula_nome})</span>
-              <span className="font-semibold">{q}</span>
-            </div>
-          )}
-          <div className="flex justify-between p-2 rounded-lg bg-white">
-            <span className="text-bark-600">
-              Cartoni ({tip.tipo_cartone_nome}, {cartoneCap}/cad)
-            </span>
-            <span className="font-semibold">{cartoniNecessari}</span>
-          </div>
-          {tip.famiglia_is_spumante && tip.tipo_cestello_nome && (
-            <div className="flex justify-between p-2 rounded-lg bg-white">
-              <span className="text-bark-600">Cestelli ({tip.tipo_cestello_nome})</span>
-              <span className="font-semibold">{q}</span>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
 
   const handleCreaSenza = async (e) => {
     e.preventDefault();
@@ -482,6 +481,7 @@ export default function Imbottigliamento() {
           </label>
 
           <MaterialPreview
+            tipologie={tipologie}
             tipId={formSenza.tipologia_vino_id}
             qty={formSenza.quantita}
             conEtichetta={false}
@@ -525,6 +525,7 @@ export default function Imbottigliamento() {
           </label>
 
           <MaterialPreview
+            tipologie={tipologie}
             tipId={formCon.tipologia_vino_id}
             qty={formCon.quantita}
             conEtichetta={true}

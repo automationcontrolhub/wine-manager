@@ -52,6 +52,12 @@ export const aggiuntaVino = (data) =>
 export const caricoMagazzino = (data) =>
   api.post('/carico-magazzino/', data).then(r => r.data);
 
+export const rettificaMagazzino = (data) =>
+  api.post('/rettifica-magazzino/', data).then(r => r.data);
+
+export const rettificaSilos = (data) =>
+  api.post('/rettifica-silos/', data).then(r => r.data);
+
 export const creaSenzaEtichetta = (data) =>
   api.post('/crea-senza-etichetta/', data).then(r => r.data);
 

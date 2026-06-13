@@ -24,7 +24,6 @@ from .serializers import (
     CaricoMagazzinoSerializer,
     ClienteSerializer, AgenteSerializer,
     OrdineSerializer, OrdineCreateSerializer,
-    BottiglieDisponibiliSerializer,
 )
 
 
@@ -96,12 +95,14 @@ class LottoBottiglieViewSet(viewsets.ReadOnlyModelViewSet):
         'tipologia_vino', 'tipologia_vino__famiglia'
     ).all()
     serializer_class = LottoBottiglieSerializer
+    pagination_class = None
     filterset_fields = ['stato', 'tipologia_vino', 'ha_etichetta']
 
 
 class MovimentoMagazzinoViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = MovimentoMagazzino.objects.all()
     serializer_class = MovimentoMagazzinoSerializer
+    pagination_class = None
 
 
 # ─── Aggiunta vino al silos ───────────────────────────────────────────────
@@ -112,14 +113,16 @@ def aggiunta_vino(request):
     ser = AggiuntaVinoSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
 
-    try:
-        tipologia = TipologiaVino.objects.get(id=ser.validated_data['tipologia_vino_id'])
-    except TipologiaVino.DoesNotExist:
-        return Response({'error': 'Tipologia non trovata'}, status=404)
-
     litri = ser.validated_data['litri']
 
     with transaction.atomic():
+        try:
+            tipologia = TipologiaVino.objects.select_for_update().get(
+                id=ser.validated_data['tipologia_vino_id']
+            )
+        except TipologiaVino.DoesNotExist:
+            return Response({'error': 'Tipologia non trovata'}, status=404)
+
         tipologia.quantita_litri += litri
         tipologia.save(update_fields=['quantita_litri'])
 
@@ -160,12 +163,12 @@ def carico_magazzino(request):
 
     ModelClass, mov_cat = MODEL_MAP[cat]
 
-    try:
-        obj = ModelClass.objects.get(id=tipo_id)
-    except ModelClass.DoesNotExist:
-        return Response({'error': f'Tipo {cat} non trovato'}, status=404)
-
     with transaction.atomic():
+        try:
+            obj = ModelClass.objects.select_for_update().get(id=tipo_id)
+        except ModelClass.DoesNotExist:
+            return Response({'error': f'Tipo {cat} non trovato'}, status=404)
+
         obj.quantita += qty
         obj.save(update_fields=['quantita'])
 
@@ -328,6 +331,8 @@ def _scala_materiali(tipologia, quantita, con_etichetta=True, con_capsula=True):
         descrizione=f"Cartoni per {tipologia}",
     )
 
+    return cartoni_necessari
+
 
 # ─── Creazione bottiglie SENZA etichetta ──────────────────────────────────
 
@@ -337,27 +342,27 @@ def crea_bottiglie_senza_etichetta(request):
     ser.is_valid(raise_exception=True)
     d = ser.validated_data
 
-    try:
-        tipologia = TipologiaVino.objects.select_related(
-            'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
-            'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
-        ).get(id=d['tipologia_vino_id'])
-    except TipologiaVino.DoesNotExist:
-        return Response({'error': 'Tipologia non trovata'}, status=404)
-
     quantita = d['quantita']
     con_capsula = d['con_capsula']
 
-    # Verifica materiali (senza etichetta)
-    errori = _verifica_materiali(tipologia, quantita, con_etichetta=False, con_capsula=con_capsula)
-    if errori:
-        return Response({'errors': errori}, status=400)
-
     with transaction.atomic():
-        _scala_materiali(tipologia, quantita, con_etichetta=False, con_capsula=con_capsula)
+        try:
+            tipologia = TipologiaVino.objects.select_related(
+                'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
+                'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
+            ).select_for_update(of=('self',)).get(id=d['tipologia_vino_id'])
+        except TipologiaVino.DoesNotExist:
+            return Response({'error': 'Tipologia non trovata'}, status=404)
+
+        # Verifica materiali (senza etichetta) – dentro la transazione con lock
+        errori = _verifica_materiali(tipologia, quantita, con_etichetta=False, con_capsula=con_capsula)
+        if errori:
+            return Response({'errors': errori}, status=400)
+
+        cartoni_usati = _scala_materiali(tipologia, quantita, con_etichetta=False, con_capsula=con_capsula)
 
         # Cerca lotto esistente con stesse caratteristiche per aggregare
-        lotto_esistente = LottoBottiglie.objects.filter(
+        lotto_esistente = LottoBottiglie.objects.select_for_update().filter(
             tipologia_vino=tipologia,
             stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
             ha_etichetta=False,
@@ -377,14 +382,14 @@ def crea_bottiglie_senza_etichetta(request):
                 ha_capsula=con_capsula,
             )
 
-        # Salva snapshot operazione per annullamento
+        # Salva snapshot operazione per annullamento (include cartoni per ripristino preciso)
         OperazioneImbottigliamento.objects.create(
             tipo=OperazioneImbottigliamento.TipoOperazione.CREA_SENZA_ETICHETTA,
             tipologia_vino=tipologia,
             quantita=quantita,
             con_etichetta=False,
             con_capsula=con_capsula,
-            dettagli={'lotto_id': lotto.id},
+            dettagli={'lotto_id': lotto.id, 'cartoni_necessari': cartoni_usati},
         )
 
     return Response(LottoBottiglieSerializer(lotto).data, status=201)
@@ -398,25 +403,26 @@ def crea_bottiglie_con_etichetta(request):
     ser.is_valid(raise_exception=True)
     d = ser.validated_data
 
-    try:
-        tipologia = TipologiaVino.objects.select_related(
-            'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
-            'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
-        ).get(id=d['tipologia_vino_id'])
-    except TipologiaVino.DoesNotExist:
-        return Response({'error': 'Tipologia non trovata'}, status=404)
-
     quantita = d['quantita']
     con_capsula = d['con_capsula']
 
-    errori = _verifica_materiali(tipologia, quantita, con_etichetta=True, con_capsula=con_capsula)
-    if errori:
-        return Response({'errors': errori}, status=400)
-
     with transaction.atomic():
-        _scala_materiali(tipologia, quantita, con_etichetta=True, con_capsula=con_capsula)
+        try:
+            tipologia = TipologiaVino.objects.select_related(
+                'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
+                'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
+            ).select_for_update(of=('self',)).get(id=d['tipologia_vino_id'])
+        except TipologiaVino.DoesNotExist:
+            return Response({'error': 'Tipologia non trovata'}, status=404)
 
-        lotto_esistente = LottoBottiglie.objects.filter(
+        # Verifica materiali – dentro la transazione con lock
+        errori = _verifica_materiali(tipologia, quantita, con_etichetta=True, con_capsula=con_capsula)
+        if errori:
+            return Response({'errors': errori}, status=400)
+
+        cartoni_usati = _scala_materiali(tipologia, quantita, con_etichetta=True, con_capsula=con_capsula)
+
+        lotto_esistente = LottoBottiglie.objects.select_for_update().filter(
             tipologia_vino=tipologia,
             stato=LottoBottiglie.Stato.COMPLETA,
             ha_etichetta=True,
@@ -436,14 +442,14 @@ def crea_bottiglie_con_etichetta(request):
                 ha_capsula=con_capsula,
             )
 
-        # Salva snapshot operazione per annullamento
+        # Salva snapshot operazione per annullamento (include cartoni per ripristino preciso)
         OperazioneImbottigliamento.objects.create(
             tipo=OperazioneImbottigliamento.TipoOperazione.CREA_CON_ETICHETTA,
             tipologia_vino=tipologia,
             quantita=quantita,
             con_etichetta=True,
             con_capsula=con_capsula,
-            dettagli={'lotto_id': lotto.id},
+            dettagli={'lotto_id': lotto.id, 'cartoni_necessari': cartoni_usati},
         )
 
     return Response(LottoBottiglieSerializer(lotto).data, status=201)
@@ -459,7 +465,7 @@ def associa_etichetta(request):
     applica l'etichetta della tipologia DESTINAZIONE (può essere diversa!),
     e aggiunge al lotto COMPLETA con tipologia destinazione.
     Scala etichette della destinazione (e opzionalmente capsule se non c'erano).
-    
+
     LOGICA INTELLIGENTE PER CAPSULE:
     - Se con_capsula=True → prendi PRIMA dai lotti SENZA capsula (aggiungi capsula)
     - Se con_capsula=False → prendi PRIMA dai lotti CON capsula (non sprecare capsule)
@@ -468,82 +474,86 @@ def associa_etichetta(request):
     ser.is_valid(raise_exception=True)
     d = ser.validated_data
 
-    try:
-        tipologia_origine = TipologiaVino.objects.select_related(
-            'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
-            'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
-        ).get(id=d['tipologia_vino_origine_id'])
-    except TipologiaVino.DoesNotExist:
-        return Response({'error': 'Tipologia origine non trovata'}, status=404)
-
-    try:
-        tipologia_dest = TipologiaVino.objects.select_related(
-            'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
-            'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
-        ).get(id=d['tipologia_vino_destinazione_id'])
-    except TipologiaVino.DoesNotExist:
-        return Response({'error': 'Tipologia destinazione non trovata'}, status=404)
-
+    orig_id = d['tipologia_vino_origine_id']
+    dest_id = d['tipologia_vino_destinazione_id']
     quantita = d['quantita']
     con_capsula = d['con_capsula']
 
-    # Trova bottiglie senza etichetta della tipologia ORIGINE
-    # Ordine intelligente basato sul flag con_capsula
-    if con_capsula:
-        # Se vogliamo aggiungere capsula, prendiamo PRIMA quelle senza
-        lotti_senza = LottoBottiglie.objects.filter(
-            tipologia_vino=tipologia_origine,
-            stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
-            ha_etichetta=False,
-        ).order_by('ha_capsula', 'data_creazione')  # False prima (senza capsula)
-    else:
-        # Se NON vogliamo capsula, prendiamo PRIMA quelle che già ce l'hanno
-        lotti_senza = LottoBottiglie.objects.filter(
-            tipologia_vino=tipologia_origine,
-            stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
-            ha_etichetta=False,
-        ).order_by('-ha_capsula', 'data_creazione')  # True prima (con capsula)
+    with transaction.atomic():
+        # Blocca le tipologie in ordine crescente di ID per prevenire deadlock
+        ids_sorted = sorted(set([orig_id, dest_id]))
+        locked = {
+            t.id: t
+            for t in TipologiaVino.objects.select_related(
+                'famiglia', 'tipo_cartone', 'tipo_tappo', 'tipo_bottiglia',
+                'tipo_etichetta', 'tipo_capsula', 'tipo_cestello'
+            ).select_for_update(of=('self',)).filter(id__in=ids_sorted).order_by('id')
+        }
 
-    totale_disponibile = sum(l.quantita for l in lotti_senza)
-    if totale_disponibile < quantita:
-        return Response({
-            'errors': [
-                f"Bottiglie senza etichetta insufficienti per {tipologia_origine}: "
-                f"servono {quantita}, disponibili {totale_disponibile}"
-            ]
-        }, status=400)
+        if orig_id not in locked:
+            return Response({'error': 'Tipologia origine non trovata'}, status=404)
+        if dest_id not in locked:
+            return Response({'error': 'Tipologia destinazione non trovata'}, status=404)
 
-    # Verifica materiali della tipologia DESTINAZIONE (etichetta e opzionalmente capsule)
-    errori = []
-    if tipologia_dest.tipo_etichetta.quantita < quantita:
-        errori.append(
-            f"Etichette '{tipologia_dest.tipo_etichetta.nome}' insufficienti: "
-            f"servono {quantita}, disponibili {tipologia_dest.tipo_etichetta.quantita}"
-        )
+        tipologia_origine = locked[orig_id]
+        tipologia_dest = locked[dest_id]
 
-    # Conta quante capsule servono davvero
-    # Solo le bottiglie SENZA capsula che vogliamo trasformare IN con capsula
-    capsule_da_aggiungere = 0
-    if con_capsula:
-        rimanenti = quantita
-        for lotto in lotti_senza:
-            if rimanenti <= 0:
-                break
-            da_prendere = min(rimanenti, lotto.quantita)
-            if not lotto.ha_capsula:
-                capsule_da_aggiungere += da_prendere
-            rimanenti -= da_prendere
+        # Trova e blocca i lotti senza etichetta della ORIGINE, valutati UNA SOLA VOLTA
+        if con_capsula:
+            # Se vogliamo aggiungere capsula, prendiamo PRIMA quelle senza
+            lotti_senza = list(
+                LottoBottiglie.objects.select_for_update().filter(
+                    tipologia_vino=tipologia_origine,
+                    stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                    ha_etichetta=False,
+                ).order_by('ha_capsula', 'data_creazione')  # False prima (senza capsula)
+            )
+        else:
+            # Se NON vogliamo capsula, prendiamo PRIMA quelle che già ce l'hanno
+            lotti_senza = list(
+                LottoBottiglie.objects.select_for_update().filter(
+                    tipologia_vino=tipologia_origine,
+                    stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                    ha_etichetta=False,
+                ).order_by('-ha_capsula', 'data_creazione')  # True prima (con capsula)
+            )
 
+        totale_disponibile = sum(l.quantita for l in lotti_senza)
+        if totale_disponibile < quantita:
+            return Response({
+                'errors': [
+                    f"Bottiglie senza etichetta insufficienti per {tipologia_origine}: "
+                    f"servono {quantita}, disponibili {totale_disponibile}"
+                ]
+            }, status=400)
+
+        # Conta quante capsule servono davvero (solo bottiglie SENZA capsula da convertire)
+        capsule_da_aggiungere = 0
+        if con_capsula:
+            rimanenti = quantita
+            for lotto in lotti_senza:
+                if rimanenti <= 0:
+                    break
+                da_prendere = min(rimanenti, lotto.quantita)
+                if not lotto.ha_capsula:
+                    capsule_da_aggiungere += da_prendere
+                rimanenti -= da_prendere
+
+        # Verifica disponibilità etichette e capsule della DESTINAZIONE
+        errori = []
+        if tipologia_dest.tipo_etichetta.quantita < quantita:
+            errori.append(
+                f"Etichette '{tipologia_dest.tipo_etichetta.nome}' insufficienti: "
+                f"servono {quantita}, disponibili {tipologia_dest.tipo_etichetta.quantita}"
+            )
         if capsule_da_aggiungere > 0 and tipologia_dest.tipo_capsula.quantita < capsule_da_aggiungere:
             errori.append(
                 f"Capsule '{tipologia_dest.tipo_capsula.nome}' insufficienti: "
                 f"servono {capsule_da_aggiungere}, disponibili {tipologia_dest.tipo_capsula.quantita}"
             )
+        if errori:
+            return Response({'errors': errori}, status=400)
 
-    if errori:
-        return Response({'errors': errori}, status=400)
-
-    with transaction.atomic():
         # Scala etichette della DESTINAZIONE
         tipologia_dest.tipo_etichetta.quantita -= quantita
         tipologia_dest.tipo_etichetta.save(update_fields=['quantita'])
@@ -565,8 +575,7 @@ def associa_etichetta(request):
                 descrizione=f"Capsule '{tipologia_dest.tipo_capsula.nome}' associate (step etichetta)",
             )
 
-        # Scala dai lotti senza etichetta della ORIGINE
-        # L'ordinamento già fatto garantisce che prendiamo nel giusto ordine
+        # Scala dai lotti senza etichetta della ORIGINE (lista già valutata e bloccata)
         rimanenti = quantita
         for lotto in lotti_senza:
             if rimanenti <= 0:
@@ -580,7 +589,7 @@ def associa_etichetta(request):
             rimanenti -= da_prendere
 
         # Aggiungi al lotto completo con tipologia DESTINAZIONE
-        lotto_completo = LottoBottiglie.objects.filter(
+        lotto_completo = LottoBottiglie.objects.select_for_update().filter(
             tipologia_vino=tipologia_dest,
             stato=LottoBottiglie.Stato.COMPLETA,
             ha_etichetta=True,
@@ -600,25 +609,6 @@ def associa_etichetta(request):
             )
 
         # Salva snapshot operazione per annullamento
-        # Memorizziamo i dettagli dei lotti origine consumati per poter ripristinare
-        lotti_consumati_dettagli = []
-        rimanenti = quantita
-        # Riprendiamo l'ordinamento corretto dei lotti origine
-        if con_capsula:
-            lotti_check = LottoBottiglie.objects.filter(
-                tipologia_vino=tipologia_origine,
-                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
-                ha_etichetta=False,
-            ).order_by('ha_capsula', 'data_creazione')
-        else:
-            lotti_check = LottoBottiglie.objects.filter(
-                tipologia_vino=tipologia_origine,
-                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
-                ha_etichetta=False,
-            ).order_by('-ha_capsula', 'data_creazione')
-
-        # Nota: a questo punto i lotti sono già stati scalati, quindi salviamo
-        # solo i totali per ricostruire in caso di annullamento
         OperazioneImbottigliamento.objects.create(
             tipo=OperazioneImbottigliamento.TipoOperazione.ASSOCIA_ETICHETTA,
             tipologia_vino=tipologia_origine,
@@ -714,6 +704,7 @@ class OperazioneImbottigliamentoViewSet(viewsets.ReadOnlyModelViewSet):
         'tipologia_vino_destinazione', 'tipologia_vino_destinazione__famiglia',
     ).all()
     serializer_class = OperazioneImbottigliamentoSerializer
+    pagination_class = None
     filterset_fields = ['stato', 'tipo']
 
 
@@ -777,10 +768,7 @@ def _annulla_crea_senza_etichetta(op):
     quantita = op.quantita
     con_capsula = op.con_capsula
 
-    # Ripristina materiali in magazzino
-    _ripristina_materiali(tipologia, quantita, con_etichetta=False, con_capsula=con_capsula)
-
-    # Sottrai dal lotto senza etichetta
+    # Trova il lotto PRIMA di ripristinare i materiali per sapere quante bottiglie ci sono
     lotto = LottoBottiglie.objects.filter(
         tipologia_vino=tipologia,
         stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
@@ -788,15 +776,21 @@ def _annulla_crea_senza_etichetta(op):
         ha_capsula=con_capsula,
     ).first()
 
-    if lotto:
-        if lotto.quantita > quantita:
-            lotto.quantita -= quantita
-            lotto.save(update_fields=['quantita', 'data_aggiornamento'])
-        elif lotto.quantita == quantita:
+    # Ripristina solo i materiali corrispondenti alle bottiglie ancora presenti
+    quantita_da_ripristinare = min(lotto.quantita, quantita) if lotto else 0
+    if quantita_da_ripristinare > 0:
+        # Usa il valore storico dei cartoni solo se si ripristina l'intera quantità originale
+        cartoni_override = op.dettagli.get('cartoni_necessari') if quantita_da_ripristinare == quantita else None
+        _ripristina_materiali(
+            tipologia, quantita_da_ripristinare,
+            con_etichetta=False, con_capsula=con_capsula,
+            cartoni_override=cartoni_override,
+        )
+        if lotto.quantita <= quantita:
             lotto.delete()
         else:
-            # Se ci sono meno bottiglie nel lotto di quanto annullare, eliminiamo solo quello che c'è
-            lotto.delete()
+            lotto.quantita -= quantita
+            lotto.save(update_fields=['quantita', 'data_aggiornamento'])
 
 
 def _annulla_crea_con_etichetta(op):
@@ -805,10 +799,7 @@ def _annulla_crea_con_etichetta(op):
     quantita = op.quantita
     con_capsula = op.con_capsula
 
-    # Ripristina materiali in magazzino
-    _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=con_capsula)
-
-    # Sottrai dal lotto completo
+    # Trova il lotto PRIMA di ripristinare i materiali per sapere quante bottiglie ci sono
     lotto = LottoBottiglie.objects.filter(
         tipologia_vino=tipologia,
         stato=LottoBottiglie.Stato.COMPLETA,
@@ -816,12 +807,20 @@ def _annulla_crea_con_etichetta(op):
         ha_capsula=con_capsula,
     ).first()
 
-    if lotto:
-        if lotto.quantita > quantita:
+    # Ripristina solo i materiali corrispondenti alle bottiglie ancora presenti
+    quantita_da_ripristinare = min(lotto.quantita, quantita) if lotto else 0
+    if quantita_da_ripristinare > 0:
+        cartoni_override = op.dettagli.get('cartoni_necessari') if quantita_da_ripristinare == quantita else None
+        _ripristina_materiali(
+            tipologia, quantita_da_ripristinare,
+            con_etichetta=True, con_capsula=con_capsula,
+            cartoni_override=cartoni_override,
+        )
+        if lotto.quantita <= quantita:
+            lotto.delete()
+        else:
             lotto.quantita -= quantita
             lotto.save(update_fields=['quantita', 'data_aggiornamento'])
-        else:
-            lotto.delete()
 
 
 def _annulla_associa_etichetta(op):
@@ -949,13 +948,14 @@ def _annulla_associa_etichetta(op):
     return None  # nessun errore
 
 
-def _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=True):
+def _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=True, cartoni_override=None):
     """Rimette materiali in magazzino e vino nel silos (inverso di _scala_materiali)."""
     is_spumante = tipologia.famiglia.is_spumante
     capacita_bottiglia = tipologia.tipo_bottiglia.capacita_litri
     litri = Decimal(str(quantita)) * capacita_bottiglia
     cap = tipologia.tipo_cartone.capacita_bottiglie
-    cartoni = -(-quantita // cap)
+    # Usa il valore storico se disponibile, altrimenti ricalcola con la capacità attuale
+    cartoni = cartoni_override if cartoni_override is not None else -(-quantita // cap)
 
     # Ripristina vino
     tipologia.quantita_litri += litri
@@ -1029,6 +1029,113 @@ def _ripristina_materiali(tipologia, quantita, con_etichetta=True, con_capsula=T
         quantita=cartoni,
         descrizione=f"Ripristino {cartoni} cartoni '{tipologia.tipo_cartone.nome}'",
     )
+
+
+# ─── Rettifica magazzino (modifica assoluta con log) ──────────────────────
+
+@api_view(['POST'])
+def rettifica_magazzino(request):
+    """
+    Imposta la quantità assoluta di un materiale e registra il delta come movimento.
+    Usato dalla UI al posto del PATCH diretto per garantire la tracciabilità.
+    """
+    from .serializers import RettificaMagazzinoSerializer
+    ser = RettificaMagazzinoSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    d = ser.validated_data
+
+    cat = d['categoria']
+    tipo_id = d['tipo_id']
+    nuova_quantita = d['nuova_quantita']
+
+    MODEL_MAP = {
+        'cartone': (TipoCartone, MovimentoMagazzino.Categoria.CARTONE),
+        'tappo': (TipoTappo, MovimentoMagazzino.Categoria.TAPPO),
+        'bottiglia': (TipoBottiglia, MovimentoMagazzino.Categoria.BOTTIGLIA),
+        'etichetta': (TipoEtichetta, MovimentoMagazzino.Categoria.ETICHETTA),
+        'capsula': (TipoCapsula, MovimentoMagazzino.Categoria.CAPSULA),
+        'cestello': (TipoCestello, MovimentoMagazzino.Categoria.CESTELLO),
+        'gadget': (TipoGadget, MovimentoMagazzino.Categoria.GADGET),
+    }
+    ModelClass, mov_cat = MODEL_MAP[cat]
+
+    with transaction.atomic():
+        try:
+            obj = ModelClass.objects.select_for_update().get(id=tipo_id)
+        except ModelClass.DoesNotExist:
+            return Response({'error': f'Tipo {cat} non trovato'}, status=404)
+
+        vecchia_quantita = obj.quantita
+        delta = nuova_quantita - vecchia_quantita
+
+        if delta == 0:
+            return Response({'ok': True, 'nuova_quantita': obj.quantita, 'delta': 0})
+
+        obj.quantita = nuova_quantita
+        obj.save(update_fields=['quantita'])
+
+        tipo_mov = (
+            MovimentoMagazzino.TipoMovimento.CARICO
+            if delta > 0
+            else MovimentoMagazzino.TipoMovimento.SCARICO
+        )
+        MovimentoMagazzino.objects.create(
+            tipo=tipo_mov,
+            categoria=mov_cat,
+            quantita=abs(delta),
+            descrizione=f"Rettifica manuale {obj}: {vecchia_quantita} → {nuova_quantita}",
+            riferimento_id=obj.id,
+            riferimento_tipo=ModelClass.__name__,
+        )
+
+    return Response({'ok': True, 'nuova_quantita': obj.quantita, 'delta': delta})
+
+
+@api_view(['POST'])
+def rettifica_silos(request):
+    """
+    Imposta la quantità assoluta di litri in un silos e registra il delta come movimento.
+    Usato dalla UI al posto del PATCH diretto per garantire la tracciabilità.
+    """
+    from .serializers import RettificaSilosSerializer
+    ser = RettificaSilosSerializer(data=request.data)
+    ser.is_valid(raise_exception=True)
+    d = ser.validated_data
+
+    nuova_quantita_litri = d['nuova_quantita_litri']
+
+    with transaction.atomic():
+        try:
+            tipologia = TipologiaVino.objects.select_for_update().get(
+                id=d['tipologia_vino_id']
+            )
+        except TipologiaVino.DoesNotExist:
+            return Response({'error': 'Tipologia non trovata'}, status=404)
+
+        vecchia_quantita = tipologia.quantita_litri
+        delta = nuova_quantita_litri - vecchia_quantita
+
+        if delta == 0:
+            return Response({'ok': True, 'nuova_quantita_litri': str(tipologia.quantita_litri), 'delta': '0'})
+
+        tipologia.quantita_litri = nuova_quantita_litri
+        tipologia.save(update_fields=['quantita_litri'])
+
+        tipo_mov = (
+            MovimentoMagazzino.TipoMovimento.AGGIUNTA_VINO
+            if delta > 0
+            else MovimentoMagazzino.TipoMovimento.SCARICO
+        )
+        MovimentoMagazzino.objects.create(
+            tipo=tipo_mov,
+            categoria=MovimentoMagazzino.Categoria.VINO,
+            quantita=abs(delta),
+            descrizione=f"Rettifica manuale silos {tipologia}: {vecchia_quantita}L → {nuova_quantita_litri}L",
+            riferimento_id=tipologia.id,
+            riferimento_tipo='TipologiaVino',
+        )
+
+    return Response({'ok': True, 'nuova_quantita_litri': str(tipologia.quantita_litri), 'delta': str(delta)})
 
 
 # ─── Clienti / Agenti ViewSets ────────────────────────────────────────────
@@ -1308,7 +1415,7 @@ class OrdineViewSet(viewsets.ModelViewSet):
             except Agente.DoesNotExist:
                 return Response({'error': 'Agente non trovato'}, status=404)
 
-        # Verifica disponibilità magazzino
+        # Verifica disponibilità magazzino (pre-check per feedback rapido all'utente)
         errori = _verifica_disponibilita_ordine(d['righe_bottiglie'], d.get('righe_gadget') or [])
         if errori:
             return Response({'errors': errori}, status=400)
@@ -1343,7 +1450,11 @@ class OrdineViewSet(viewsets.ModelViewSet):
                     quantita=r['quantita'],
                 )
 
-            _applica_scarico_ordine(ordine)
+            try:
+                _applica_scarico_ordine(ordine)
+            except ValueError as e:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'errors': [str(e), 'Disponibilità magazzino esaurita durante la creazione. Riprova.']})
 
         ordine.refresh_from_db()
         return Response(OrdineSerializer(ordine).data, status=201)
@@ -1543,7 +1654,11 @@ class OrdineViewSet(viewsets.ModelViewSet):
             return Response({'errors': errori}, status=400)
 
         with transaction.atomic():
-            _applica_scarico_ordine(ordine)
+            try:
+                _applica_scarico_ordine(ordine)
+            except ValueError as e:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError({'errors': [str(e), 'Disponibilità magazzino esaurita. Verifica le scorte prima di ripristinare.']})
             ordine.stato = Ordine.Stato.CONFERMATO
             ordine.data_annullamento = None
             ordine.save(update_fields=['stato', 'data_annullamento'])

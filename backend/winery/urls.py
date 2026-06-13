@@ -24,6 +24,8 @@ urlpatterns = [
     path('dashboard/', views.dashboard),
     path('aggiunta-vino/', views.aggiunta_vino),
     path('carico-magazzino/', views.carico_magazzino),
+    path('rettifica-magazzino/', views.rettifica_magazzino),
+    path('rettifica-silos/', views.rettifica_silos),
     path('crea-senza-etichetta/', views.crea_bottiglie_senza_etichetta),
     path('crea-con-etichetta/', views.crea_bottiglie_con_etichetta),
     path('associa-etichetta/', views.associa_etichetta),

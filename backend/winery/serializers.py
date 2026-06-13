@@ -164,6 +164,23 @@ class OperazioneImbottigliamentoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 
+# ─── Rettifica ────────────────────────────────────────────────────────────
+
+class RettificaMagazzinoSerializer(serializers.Serializer):
+    """Per impostare la quantità assoluta di un materiale in magazzino con logging."""
+    categoria = serializers.ChoiceField(choices=[
+        'cartone', 'tappo', 'bottiglia', 'etichetta', 'capsula', 'cestello', 'gadget'
+    ])
+    tipo_id = serializers.IntegerField()
+    nuova_quantita = serializers.IntegerField(min_value=0)
+
+
+class RettificaSilosSerializer(serializers.Serializer):
+    """Per impostare la quantità assoluta di litri in un silos con logging."""
+    tipologia_vino_id = serializers.IntegerField()
+    nuova_quantita_litri = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=0)
+
+
 # ─── Clienti / Agenti ─────────────────────────────────────────────────────
 
 class ClienteSerializer(serializers.ModelSerializer):

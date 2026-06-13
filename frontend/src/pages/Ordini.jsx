@@ -4,7 +4,6 @@ import {
   ShoppingCart, Plus, Edit3, XCircle, Trash2, Eye, Truck, CheckCircle2,
   Receipt, Tag as TagIcon, Wine, Gift, User, UserCog, RefreshCcw, PackageCheck,
 } from 'lucide-react';
-import Modal from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
 import {
   ordini, clienti, agenti, tipoGadget,
@@ -444,6 +443,16 @@ function OrdineForm({ editingOrdine, clientiList, agentiList, gadgetList, bottig
       return;
     }
     const [tipId, eti, cap] = key.split('|');
+    // Avvisa se la stessa tipologia è già presente in un'altra riga
+    const duplicato = righeBott.some((r, i) =>
+      i !== idx &&
+      String(r.tipologia_vino_id) === tipId &&
+      !!r.ha_etichetta === (eti === 'true') &&
+      !!r.ha_capsula === (cap === 'true')
+    );
+    if (duplicato) {
+      toast('⚠️ Tipologia già presente in un\'altra riga. All\'invio le quantità verranno sommate automaticamente.', { duration: 5000 });
+    }
     updateRigaBott(idx, {
       tipologia_vino_id: Number(tipId),
       ha_etichetta: eti === 'true',
@@ -451,15 +460,28 @@ function OrdineForm({ editingOrdine, clientiList, agentiList, gadgetList, bottig
     });
   };
 
-  // Calcola giacenza per riga
-  const getDisponibile = (riga) => {
+  // Calcola giacenza NETTA per una riga: stock totale − quantità già richieste nelle ALTRE righe dello stesso tipo
+  const getDisponibile = (riga, idx) => {
     if (!riga.tipologia_vino_id) return null;
     const found = bottiglieDisponibili.find(b =>
       b.tipologia_vino_id === Number(riga.tipologia_vino_id) &&
       b.ha_etichetta === !!riga.ha_etichetta &&
       b.ha_capsula === !!riga.ha_capsula
     );
-    return found?.quantita_totale ?? 0;
+    const stockTotale = found?.quantita_totale ?? 0;
+    // Sottrai le quantità delle altre righe che usano lo stesso tipo
+    const altreRighe = righeBott.reduce((acc, r, i) => {
+      if (
+        i !== idx &&
+        Number(r.tipologia_vino_id) === Number(riga.tipologia_vino_id) &&
+        !!r.ha_etichetta === !!riga.ha_etichetta &&
+        !!r.ha_capsula === !!riga.ha_capsula
+      ) {
+        return acc + (Number(r.quantita) || 0);
+      }
+      return acc;
+    }, 0);
+    return Math.max(0, stockTotale - altreRighe);
   };
 
   const getGadgetDisp = (gid) => {
@@ -486,6 +508,26 @@ function OrdineForm({ editingOrdine, clientiList, agentiList, gadgetList, bottig
 
     setSubmitting(true);
     try {
+      // Fondi righe con la stessa chiave (tipologia + etichetta + capsula):
+      // somma le quantità e usa il prezzo dell'ultima riga (più recente)
+      const mergedBott = [];
+      for (const r of righeBott) {
+        const existing = mergedBott.find(x =>
+          Number(x.tipologia_vino_id) === Number(r.tipologia_vino_id) &&
+          !!x.ha_etichetta === !!r.ha_etichetta &&
+          !!x.ha_capsula === !!r.ha_capsula
+        );
+        if (existing) {
+          existing.quantita = Number(existing.quantita) + Number(r.quantita);
+          existing.prezzo_unitario = r.prezzo_unitario; // usa l'ultimo prezzo inserito
+        } else {
+          mergedBott.push({ ...r });
+        }
+      }
+      if (mergedBott.length < righeBott.length) {
+        toast('ℹ️ Righe duplicate unite automaticamente.', { duration: 3000 });
+      }
+
       const payload = {
         cliente_id: Number(clienteId),
         agente_id: agenteId ? Number(agenteId) : null,
@@ -495,7 +537,7 @@ function OrdineForm({ editingOrdine, clientiList, agentiList, gadgetList, bottig
         pacco_arrivato: paccoArrivato,
         fattura_pagata: fatturaPagata,
         note,
-        righe_bottiglie: righeBott.map(r => ({
+        righe_bottiglie: mergedBott.map(r => ({
           tipologia_vino_id: Number(r.tipologia_vino_id),
           ha_etichetta: !!r.ha_etichetta,
           ha_capsula: !!r.ha_capsula,
@@ -588,7 +630,7 @@ function OrdineForm({ editingOrdine, clientiList, agentiList, gadgetList, bottig
         <SezioneCard icon={Wine} title="Bottiglie" required>
           <div className="space-y-3">
             {righeBott.map((r, idx) => {
-              const disp = getDisponibile(r);
+              const disp = getDisponibile(r, idx);
               const subtotale = (Number(r.quantita) || 0) * (Number(r.prezzo_unitario) || 0);
               const selKey = r.tipologia_vino_id ? `${r.tipologia_vino_id}|${r.ha_etichetta}|${r.ha_capsula}` : '';
               return (

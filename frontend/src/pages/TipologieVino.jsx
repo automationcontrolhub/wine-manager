@@ -144,7 +144,8 @@ export default function TipologieVino() {
       setEditingFamigliaId(null);
       loadAll();
     } catch (e) {
-      toast.error('Errore');
+      const msg = e.response?.data;
+      toast.error(typeof msg === 'string' ? msg : JSON.stringify(msg) || 'Errore');
     }
   };
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import toast from 'react-hot-toast';
 import { getDashboard } from '../api/client';
 import {
   Wine, Package, Tag, Circle, Hexagon, ShieldCheck,
@@ -25,7 +26,10 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getDashboard().then(setData).finally(() => setLoading(false));
+    getDashboard()
+      .then(setData)
+      .catch(() => toast.error('Errore nel caricamento della dashboard'))
+      .finally(() => setLoading(false));
   }, []);
 
   if (loading) return (

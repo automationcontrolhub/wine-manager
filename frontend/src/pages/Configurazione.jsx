@@ -103,15 +103,12 @@ export default function Configurazione() {
 
   const loadAll = async () => {
     setLoading(true);
+    const responses = await Promise.all(SEZIONI.map(sez => sez.api.list().catch(() => [])));
     const results = {};
-    for (const sez of SEZIONI) {
-      try {
-        const res = await sez.api.list();
-        results[sez.key] = Array.isArray(res) ? res : (res.results || []);
-      } catch {
-        results[sez.key] = [];
-      }
-    }
+    SEZIONI.forEach((sez, i) => {
+      const res = responses[i];
+      results[sez.key] = Array.isArray(res) ? res : (res.results || []);
+    });
     setData(results);
     setLoading(false);
   };

@@ -7,6 +7,7 @@ import {
   tipoCartone, tipoTappo, tipoBottiglia,
   tipoEtichetta, tipoCapsula, tipoCestello, tipoGadget,
   tipologieVino, caricoMagazzino, aggiuntaVino,
+  rettificaMagazzino, rettificaSilos,
 } from '../api/client';
 
 const CATEGORIE = [
@@ -37,14 +38,17 @@ export default function Magazzino() {
   const loadAll = async () => {
     setLoading(true);
     try {
+      const [tipRes, ...catResponses] = await Promise.all([
+        tipologieVino.list(),
+        ...CATEGORIE.map(cat => cat.api.list()),
+      ]);
+      setTipologie(Array.isArray(tipRes) ? tipRes : tipRes.results || []);
       const results = {};
-      for (const cat of CATEGORIE) {
-        const res = await cat.api.list();
+      CATEGORIE.forEach((cat, i) => {
+        const res = catResponses[i];
         results[cat.key] = Array.isArray(res) ? res : [];
-      }
+      });
       setData(results);
-      const tip = await tipologieVino.list();
-      setTipologie(Array.isArray(tip) ? tip : tip.results || []);
     } catch (e) {
       toast.error('Errore nel caricamento');
     }
@@ -96,10 +100,12 @@ export default function Magazzino() {
 
   const handleEditQty = async (e) => {
     e.preventDefault();
-    const catDef = CATEGORIE.find(c => c.key === editForm.categoria);
-    if (!catDef) return;
     try {
-      await catDef.api.update(editForm.id, { quantita: Number(editForm.quantita) });
+      await rettificaMagazzino({
+        categoria: editForm.categoria,
+        tipo_id: editForm.id,
+        nuova_quantita: Number(editForm.quantita),
+      });
       toast.success(`Quantità di "${editForm.nome}" aggiornata`);
       setShowEditQty(false);
       loadAll();
@@ -116,7 +122,10 @@ export default function Magazzino() {
   const handleEditSilos = async (e) => {
     e.preventDefault();
     try {
-      await tipologieVino.update(editSilosForm.id, { quantita_litri: parseFloat(editSilosForm.litri) });
+      await rettificaSilos({
+        tipologia_vino_id: editSilosForm.id,
+        nuova_quantita_litri: parseFloat(editSilosForm.litri),
+      });
       toast.success('Quantità silos aggiornata');
       setShowEditSilos(false);
       loadAll();
