@@ -1,0 +1,59 @@
+# Segreti e configurazioni d'ambiente
+.env.prod
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+
+# Django
+backend/staticfiles/
+backend/media/
+db.sqlite3
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Docker volumes (dati locali)
+postgres_data/
+redis_data/
+backup_data/
+
+# Editor e OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Certificati SSL (gestiti fuori dal repo)
+nginx/certs/
+ssl/
+*.pem
+*.crt
+*.key
+
+# Log
+*.log
+logs/

@@ -1,0 +1,3 @@
+# Backup ogni giorno alle 02:00 (ora del server)
+# Formato cron: minuto ora giorno mese giorno-settimana comando
+0 2 * * * python /backup/backup.py >> /var/log/backup.log 2>&1

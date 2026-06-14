@@ -1,0 +1,132 @@
+# ── VinoManager — Docker Compose PRODUZIONE ──────────────────────────────
+# Utilizzo:
+#   cp .env.prod.example .env.prod   # compila le variabili
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+
+services:
+
+  # ── Database PostgreSQL ──────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - internal
+
+  # ── Redis (disponibile per cache / future estensioni) ────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
+  # ── Backend Django + Daphne (ASGI) ───────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings_prod
+      SECRET_KEY:             ${SECRET_KEY}
+      DATABASE_URL:           postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ALLOWED_HOSTS:          ${ALLOWED_HOSTS}
+      DJANGO_LOG_LEVEL:       ${DJANGO_LOG_LEVEL:-WARNING}
+    volumes:
+      - static_files:/app/staticfiles   # condiviso con nginx
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+    expose:
+      - "8000"
+
+  # ── Frontend React (build statica servita da Nginx interno) ──────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    restart: unless-stopped
+    networks:
+      - internal
+    expose:
+      - "80"
+
+  # ── Nginx — Reverse Proxy (unico punto d'accesso pubblico) ───────────────
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_files:/vol/static:ro                          # static Django
+      - ./nginx/certs:/etc/letsencrypt:ro                    # certificati SSL (opzionale)
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/api/dashboard/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ── Backup automatico (crond → pg_dump → Gmail) ──────────────────────────
+  backup:
+    build:
+      context: ./backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DB_HOST:            db
+      DB_PORT:            5432
+      DB_NAME:            ${POSTGRES_DB}
+      DB_USER:            ${POSTGRES_USER}
+      DB_PASSWORD:        ${POSTGRES_PASSWORD}
+      GMAIL_USER:         ${GMAIL_USER}
+      GMAIL_PASSWORD:     ${GMAIL_PASSWORD}
+      BACKUP_EMAIL:       ${BACKUP_EMAIL}
+      BACKUP_KEEP_DAYS:   ${BACKUP_KEEP_DAYS:-7}
+    volumes:
+      - backup_data:/backups
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - internal
+
+# ── Volumi persistenti ───────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  redis_data:
+  static_files:
+  backup_data:
+
+# ── Rete interna (i container non espongono porte direttamente) ──────────────
+networks:
+  internal:
+    driver: bridge
