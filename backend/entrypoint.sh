@@ -31,6 +31,9 @@ python manage.py collectstatic --no-input --clear
 echo "=== [entrypoint] Crea superuser admin ==="
 python manage.py create_admin
 
+echo "=== [entrypoint] Popolamento dati geografici (solo prima volta) ==="
+python manage.py popola_geografia || echo "Popolamento geografia fallito (non bloccante)"
+
 echo "=== [entrypoint] Avvio Daphne (ASGI) su 0.0.0.0:8000 ==="
 exec daphne \
     -b 0.0.0.0 \

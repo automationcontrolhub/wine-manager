@@ -5,7 +5,34 @@ from .models import (
     TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
     Cliente, Agente, Ordine, RigaOrdineBottiglia, RigaOrdineGadget,
+    Paese, Regione, Provincia, Citta,
 )
+
+
+# ─── Geografia ────────────────────────────────────────────────────────────
+
+class PaeseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Paese
+        fields = '__all__'
+
+
+class RegioneSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Regione
+        fields = '__all__'
+
+
+class ProvinciaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Provincia
+        fields = '__all__'
+
+
+class CittaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Citta
+        fields = '__all__'
 
 
 # ─── Materiali ────────────────────────────────────────────────────────────
@@ -185,9 +212,35 @@ class RettificaSilosSerializer(serializers.Serializer):
 
 class ClienteSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
+    paese_nome = serializers.CharField(source='paese.nome', read_only=True, allow_null=True)
+    regione_nome = serializers.CharField(source='regione.nome', read_only=True, allow_null=True)
+    provincia_nome = serializers.CharField(source='provincia.nome', read_only=True, allow_null=True)
+    provincia_sigla = serializers.CharField(source='provincia.sigla', read_only=True, allow_null=True)
+    citta_nome = serializers.CharField(source='citta.nome', read_only=True, allow_null=True)
+    indirizzo_completo = serializers.SerializerMethodField()
 
     def get_label(self, obj):
         return str(obj)
+
+    def get_indirizzo_completo(self, obj):
+        """Componi l'indirizzo completo in una stringa unica."""
+        parti = []
+        if obj.via:
+            parti.append(obj.via)
+        if obj.cap and obj.citta:
+            parti.append(f"{obj.cap} {obj.citta.nome}")
+        elif obj.citta:
+            parti.append(obj.citta.nome)
+        elif obj.cap:
+            parti.append(obj.cap)
+        if obj.provincia and obj.provincia.sigla:
+            parti.append(f"({obj.provincia.sigla})")
+        if obj.paese and obj.paese.nome != 'Italia':
+            parti.append(obj.paese.nome)
+        # Fallback su legacy
+        if not parti and obj.legacy_indirizzo:
+            return obj.legacy_indirizzo
+        return ', '.join(parti)
 
     class Meta:
         model = Cliente

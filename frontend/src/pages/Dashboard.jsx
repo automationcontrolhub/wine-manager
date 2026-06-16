@@ -47,8 +47,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="page-title">Dashboard</h1>
-        <p className="text-bark-500">Panoramica della cantina</p>
+        <h1 className="page-title">Dashboard Magazzino</h1>
+        <p className="text-bark-500">Panoramica del magazzino e della produzione</p>
       </div>
 
       {/* Stats top */}
@@ -102,6 +102,99 @@ export default function Dashboard() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Dettaglio bottiglie per tipologia */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Bottiglie complete per tipologia */}
+        <div className="card">
+          <h2 className="section-title flex items-center gap-2">
+            <Package className="w-5 h-5 text-olive-600" />
+            Bottiglie complete per tipologia
+          </h2>
+          {(!bottiglie.dettaglio_complete || bottiglie.dettaglio_complete.length === 0) ? (
+            <p className="text-bark-400 text-sm">Nessuna bottiglia completa.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-bark-100">
+                    <th className="table-header">Famiglia</th>
+                    <th className="table-header">Tipologia</th>
+                    <th className="table-header">Capsula</th>
+                    <th className="table-header text-right">Quantità</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bottiglie.dettaglio_complete.map((r, i) => (
+                    <tr key={`c-${r.tipologia_vino__id}-${r.ha_capsula}-${i}`}
+                      className="border-b border-bark-50 hover:bg-bark-50/50">
+                      <td className="table-cell text-bark-600 text-sm">{r.tipologia_vino__famiglia__nome}</td>
+                      <td className="table-cell font-semibold">{r.tipologia_vino__nome}</td>
+                      <td className="table-cell">
+                        {r.ha_capsula ? (
+                          <span className="badge-olive text-xs">Sì</span>
+                        ) : (
+                          <span className="badge-amber text-xs">No</span>
+                        )}
+                      </td>
+                      <td className="table-cell text-right">
+                        <span className="font-display font-bold text-olive-700">
+                          {r.totale.toLocaleString('it-IT')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Bottiglie senza etichetta per tipologia */}
+        <div className="card">
+          <h2 className="section-title flex items-center gap-2">
+            <Tag className="w-5 h-5 text-amber-600" />
+            Bottiglie senza etichetta per tipologia
+          </h2>
+          {(!bottiglie.dettaglio_senza_etichetta || bottiglie.dettaglio_senza_etichetta.length === 0) ? (
+            <p className="text-bark-400 text-sm">Nessuna bottiglia in attesa di etichetta.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-bark-100">
+                    <th className="table-header">Famiglia</th>
+                    <th className="table-header">Tipologia</th>
+                    <th className="table-header">Capsula</th>
+                    <th className="table-header text-right">Quantità</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {bottiglie.dettaglio_senza_etichetta.map((r, i) => (
+                    <tr key={`s-${r.tipologia_vino__id}-${r.ha_capsula}-${i}`}
+                      className="border-b border-bark-50 hover:bg-bark-50/50">
+                      <td className="table-cell text-bark-600 text-sm">{r.tipologia_vino__famiglia__nome}</td>
+                      <td className="table-cell font-semibold">{r.tipologia_vino__nome}</td>
+                      <td className="table-cell">
+                        {r.ha_capsula ? (
+                          <span className="badge-olive text-xs">Sì</span>
+                        ) : (
+                          <span className="badge-amber text-xs">No</span>
+                        )}
+                      </td>
+                      <td className="table-cell text-right">
+                        <span className="font-display font-bold text-amber-700">
+                          {r.totale.toLocaleString('it-IT')}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Magazzino riepilogo */}

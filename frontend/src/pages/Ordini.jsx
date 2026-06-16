@@ -296,21 +296,24 @@ export default function Ordini() {
                         </button>
                         {ord.stato === 'CONFERMATO' ? (
                           <button onClick={() => handleAnnulla(ord)}
-                            className="p-1.5 rounded-lg hover:bg-amber-50 text-bark-400 hover:text-amber-600 transition-colors"
-                            title="Annulla ordine">
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-amber-50 text-bark-500 hover:text-amber-700 transition-colors text-xs font-semibold"
+                            title="Annulla ordine (resta nello storico, ripristina magazzino)">
                             <XCircle className="w-4 h-4" />
+                            <span>Annulla</span>
                           </button>
                         ) : (
                           <button onClick={() => handleRipristina(ord)}
-                            className="p-1.5 rounded-lg hover:bg-olive-50 text-bark-400 hover:text-olive-600 transition-colors"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-olive-50 text-bark-500 hover:text-olive-700 transition-colors text-xs font-semibold"
                             title="Ripristina ordine">
                             <CheckCircle2 className="w-4 h-4" />
+                            <span>Ripristina</span>
                           </button>
                         )}
                         <button onClick={() => handleDelete(ord)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
-                          title="Elimina">
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-red-50 text-bark-500 hover:text-red-600 transition-colors text-xs font-semibold"
+                          title="Elimina definitivamente">
                           <Trash2 className="w-4 h-4" />
+                          <span>Elimina</span>
                         </button>
                       </div>
                     </td>

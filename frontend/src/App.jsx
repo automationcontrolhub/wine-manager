@@ -14,7 +14,7 @@ import Ordini from './pages/Ordini';
 import Configurazione from './pages/Configurazione';
 
 const navItems = [
-  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard Magazzino' },
   { to: '/tipologie', icon: Wine, label: 'Tipologie Vino' },
   { to: '/magazzino', icon: Warehouse, label: 'Magazzino' },
   { to: '/imbottigliamento', icon: Package, label: 'Imbottigliamento' },

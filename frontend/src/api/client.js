@@ -83,6 +83,16 @@ export const agenti = materiali('agenti');
 export const getBottiglieDisponibili = () =>
   api.get('/bottiglie-disponibili/').then(r => r.data);
 
+
+// ─── Geografia ───────────────────────────────────────────────────────────
+
+export const geografia = {
+  paesi: () => api.get('/paesi/').then(r => r.data),
+  regioni: (paeseId) => api.get('/regioni/', { params: paeseId ? { paese: paeseId } : {} }).then(r => r.data),
+  province: (regioneId) => api.get('/province/', { params: regioneId ? { regione: regioneId } : {} }).then(r => r.data),
+  citta: (provinciaId) => api.get('/citta/', { params: provinciaId ? { provincia: provinciaId } : {} }).then(r => r.data),
+};
+
 // ─── Ordini ──────────────────────────────────────────────────────────────
 
 export const ordini = {

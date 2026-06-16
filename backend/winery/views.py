@@ -11,6 +11,7 @@ from .models import (
     TipoCapsula, TipoCestello, TipoGadget, FamigliaVino, TipologiaVino,
     LottoBottiglie, MovimentoMagazzino, OperazioneImbottigliamento,
     Cliente, Agente, Ordine, RigaOrdineBottiglia, RigaOrdineGadget,
+    Paese, Regione, Provincia, Citta,
 )
 from .serializers import (
     TipoCartoneSerializer, TipoTappoSerializer, TipoBottigliaSerializer,
@@ -24,6 +25,7 @@ from .serializers import (
     CaricoMagazzinoSerializer,
     ClienteSerializer, AgenteSerializer,
     OrdineSerializer, OrdineCreateSerializer,
+    PaeseSerializer, RegioneSerializer, ProvinciaSerializer, CittaSerializer,
 )
 
 
@@ -659,6 +661,35 @@ def dashboard(request):
         .aggregate(totale=Sum('quantita'))['totale'] or 0
     )
 
+    # Dettaglio bottiglie per tipologia
+    dettaglio_complete = list(
+        LottoBottiglie.objects
+        .filter(stato=LottoBottiglie.Stato.COMPLETA)
+        .values(
+            'tipologia_vino__id',
+            'tipologia_vino__nome',
+            'tipologia_vino__famiglia__nome',
+            'tipologia_vino__famiglia__is_spumante',
+            'ha_capsula',
+        )
+        .annotate(totale=Sum('quantita'))
+        .order_by('tipologia_vino__famiglia__nome', 'tipologia_vino__nome')
+    )
+
+    dettaglio_senza_etichetta = list(
+        LottoBottiglie.objects
+        .filter(stato=LottoBottiglie.Stato.SENZA_ETICHETTA)
+        .values(
+            'tipologia_vino__id',
+            'tipologia_vino__nome',
+            'tipologia_vino__famiglia__nome',
+            'tipologia_vino__famiglia__is_spumante',
+            'ha_capsula',
+        )
+        .annotate(totale=Sum('quantita'))
+        .order_by('tipologia_vino__famiglia__nome', 'tipologia_vino__nome')
+    )
+
     # Ultimi movimenti
     ultimi_movimenti = MovimentoMagazzinoSerializer(
         MovimentoMagazzino.objects.all()[:10], many=True
@@ -670,6 +701,8 @@ def dashboard(request):
         'bottiglie': {
             'senza_etichetta': bottiglie_senza_etichetta,
             'complete': bottiglie_complete,
+            'dettaglio_complete': dettaglio_complete,
+            'dettaglio_senza_etichetta': dettaglio_senza_etichetta,
         },
         'ultimi_movimenti': ultimi_movimenti,
     })
@@ -1372,6 +1405,50 @@ def _applica_ripristino_ordine(ordine):
         )
     for r in ordine.righe_gadget.select_related('tipo_gadget').all():
         _ripristina_gadget_da_ordine(r.tipo_gadget, r.quantita, ordine)
+
+
+# ─── Geografia ViewSets ───────────────────────────────────────────────────
+
+class PaeseViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = Paese.objects.all()
+    serializer_class = PaeseSerializer
+    pagination_class = None
+
+
+class RegioneViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = RegioneSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = Regione.objects.all()
+        paese_id = self.request.query_params.get('paese')
+        if paese_id:
+            qs = qs.filter(paese_id=paese_id)
+        return qs
+
+
+class ProvinciaViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = ProvinciaSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = Provincia.objects.all()
+        regione_id = self.request.query_params.get('regione')
+        if regione_id:
+            qs = qs.filter(regione_id=regione_id)
+        return qs
+
+
+class CittaViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = CittaSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        qs = Citta.objects.all()
+        provincia_id = self.request.query_params.get('provincia')
+        if provincia_id:
+            qs = qs.filter(provincia_id=provincia_id)
+        return qs
 
 
 # ─── Ordini ViewSet ───────────────────────────────────────────────────────

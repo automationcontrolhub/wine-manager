@@ -18,6 +18,10 @@ router.register(r'operazioni', views.OperazioneImbottigliamentoViewSet)
 router.register(r'clienti', views.ClienteViewSet)
 router.register(r'agenti', views.AgenteViewSet)
 router.register(r'ordini', views.OrdineViewSet)
+router.register(r'paesi', views.PaeseViewSet, basename='paese')
+router.register(r'regioni', views.RegioneViewSet, basename='regione')
+router.register(r'province', views.ProvinciaViewSet, basename='provincia')
+router.register(r'citta', views.CittaViewSet, basename='citta')
 
 urlpatterns = [
     path('', include(router.urls)),

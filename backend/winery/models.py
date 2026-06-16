@@ -292,13 +292,92 @@ class OperazioneImbottigliamento(models.Model):
         return f"{self.get_tipo_display()} × {self.quantita} — {self.tipologia_vino} ({self.get_stato_display()})"
 
 
+# ─── GEOGRAFIA ────────────────────────────────────────────────────────────
+
+class Paese(models.Model):
+    nome = models.CharField(max_length=120, unique=True)
+    codice_iso = models.CharField(max_length=3, blank=True, default='',
+                                  help_text="Codice ISO 3166-1 alpha-2 o alpha-3")
+
+    class Meta:
+        verbose_name_plural = "Paesi"
+        ordering = ['nome']
+
+    def __str__(self):
+        return self.nome
+
+
+class Regione(models.Model):
+    paese = models.ForeignKey(Paese, on_delete=models.CASCADE, related_name='regioni')
+    nome = models.CharField(max_length=120)
+    codice_istat = models.CharField(max_length=10, blank=True, default='')
+
+    class Meta:
+        verbose_name_plural = "Regioni"
+        ordering = ['nome']
+        unique_together = ['paese', 'nome']
+
+    def __str__(self):
+        return self.nome
+
+
+class Provincia(models.Model):
+    regione = models.ForeignKey(Regione, on_delete=models.CASCADE, related_name='province')
+    nome = models.CharField(max_length=120)
+    sigla = models.CharField(max_length=5, blank=True, default='')
+    codice_istat = models.CharField(max_length=10, blank=True, default='')
+
+    class Meta:
+        verbose_name_plural = "Province"
+        ordering = ['nome']
+        unique_together = ['regione', 'nome']
+
+    def __str__(self):
+        if self.sigla:
+            return f"{self.nome} ({self.sigla})"
+        return self.nome
+
+
+class Citta(models.Model):
+    provincia = models.ForeignKey(Provincia, on_delete=models.CASCADE, related_name='citta')
+    nome = models.CharField(max_length=200)
+    codice_istat = models.CharField(max_length=10, blank=True, default='')
+    codice_catastale = models.CharField(max_length=10, blank=True, default='')
+    cap_list = models.JSONField(default=list, help_text="Lista CAP disponibili per la città")
+
+    class Meta:
+        verbose_name_plural = "Città"
+        ordering = ['nome']
+        unique_together = ['provincia', 'nome']
+
+    def __str__(self):
+        return self.nome
+
+
 # ─── ANAGRAFICHE: Clienti e Agenti ────────────────────────────────────────
 
 class Cliente(models.Model):
     """Anagrafica cliente (azienda o privato)."""
     nome = models.CharField(max_length=200, help_text="Nome referente / privato")
     azienda = models.CharField(max_length=200, blank=True, default='')
-    via = models.CharField(max_length=300, blank=True, default='', help_text="Indirizzo completo")
+
+    # Indirizzo strutturato
+    paese = models.ForeignKey(Paese, on_delete=models.PROTECT,
+                              related_name='clienti', null=True, blank=True)
+    regione = models.ForeignKey(Regione, on_delete=models.PROTECT,
+                                related_name='clienti', null=True, blank=True)
+    provincia = models.ForeignKey(Provincia, on_delete=models.PROTECT,
+                                  related_name='clienti', null=True, blank=True)
+    citta = models.ForeignKey(Citta, on_delete=models.PROTECT,
+                              related_name='clienti', null=True, blank=True)
+    cap = models.CharField(max_length=10, blank=True, default='')
+    via = models.CharField(max_length=300, blank=True, default='',
+                           help_text="Via, numero civico")
+
+    # Campo legacy per dati pre-migrazione
+    legacy_indirizzo = models.CharField(max_length=300, blank=True, default='',
+                                        help_text="Indirizzo legacy (per dati pre-migrazione geografica)")
+
     partita_iva = models.CharField(max_length=30, blank=True, default='')
     telefono = models.CharField(max_length=30, blank=True, default='')
     email = models.EmailField(blank=True, default='')

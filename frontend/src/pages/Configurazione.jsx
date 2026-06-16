@@ -9,7 +9,7 @@ import { useConfirm } from '../components/ConfirmDialog';
 import {
   tipoCartone, tipoTappo, tipoBottiglia,
   tipoEtichetta, tipoCapsula, tipoCestello, tipoGadget,
-  clienti, agenti,
+  clienti, agenti, geografia,
 } from '../api/client';
 
 const SEZIONI = [
@@ -64,17 +64,10 @@ const SEZIONI = [
   // ── Anagrafiche ──────────────────────────────────────────────────────
   {
     key: 'cliente', label: 'Clienti', icon: Users, api: clienti, isAnagrafica: true,
-    campi: [
-      { name: 'azienda', label: 'Azienda', type: 'text' },
-      { name: 'nome', label: 'Nome / Referente', type: 'text', required: true },
-      { name: 'via', label: 'Indirizzo (Via, città, CAP)', type: 'text' },
-      { name: 'partita_iva', label: 'Partita IVA', type: 'text' },
-      { name: 'telefono', label: 'Telefono', type: 'tel' },
-      { name: 'email', label: 'Email', type: 'email' },
-      { name: 'note', label: 'Note', type: 'textarea' },
-    ],
-    colonne: ['azienda', 'nome', 'partita_iva', 'telefono'],
-    colonneLabel: ['Azienda', 'Nome', 'P. IVA', 'Telefono'],
+    isClienteCustom: true,  // usa form custom con geografia
+    campi: [],
+    colonne: ['azienda', 'nome', 'citta_nome', 'provincia_sigla', 'partita_iva', 'telefono'],
+    colonneLabel: ['Azienda', 'Nome', 'Città', 'Prov.', 'P. IVA', 'Telefono'],
     singolare: 'cliente',
   },
   {
@@ -125,22 +118,47 @@ export default function Configurazione() {
 
   const openEdit = (item) => {
     setEditingId(item.id);
-    const initialForm = {};
-    currentSection.campi.forEach(c => {
-      initialForm[c.name] = item[c.name] ?? '';
-    });
-    setForm(initialForm);
+    if (currentSection?.isClienteCustom) {
+      setForm({
+        azienda: item.azienda ?? '',
+        nome: item.nome ?? '',
+        paese: item.paese ?? '',
+        regione: item.regione ?? '',
+        provincia: item.provincia ?? '',
+        citta: item.citta ?? '',
+        cap: item.cap ?? '',
+        via: item.via ?? '',
+        partita_iva: item.partita_iva ?? '',
+        telefono: item.telefono ?? '',
+        email: item.email ?? '',
+        note: item.note ?? '',
+      });
+    } else {
+      const initialForm = {};
+      currentSection.campi.forEach(c => {
+        initialForm[c.name] = item[c.name] ?? '';
+      });
+      setForm(initialForm);
+    }
     setShowModal(true);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      // Normalizza i campi FK vuoti a null
+      const payload = { ...form };
+      if (currentSection?.isClienteCustom) {
+        ['paese', 'regione', 'provincia', 'citta'].forEach(k => {
+          if (payload[k] === '' || payload[k] === undefined) payload[k] = null;
+          else if (payload[k] != null) payload[k] = Number(payload[k]);
+        });
+      }
       if (editingId) {
-        await currentSection.api.update(editingId, form);
+        await currentSection.api.update(editingId, payload);
         toast.success(`${labelSingolare(currentSection)} aggiornato!`);
       } else {
-        await currentSection.api.create(form);
+        await currentSection.api.create(payload);
         toast.success(`${labelSingolare(currentSection)} creato!`);
       }
       setShowModal(false);
@@ -300,41 +318,252 @@ export default function Configurazione() {
           : currentSection?.isAnagrafica
             ? `Nuovo ${labelSingolare(currentSection)}`
             : `Nuovo tipo di ${labelSingolare(currentSection)}`}>
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className={currentSection?.isAnagrafica ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-4'}>
-            {currentSection?.campi.map(campo => (
-              <div key={campo.name} className={campo.type === 'textarea' ? 'sm:col-span-2' : ''}>
-                <label className="label">{campo.label}{campo.required && ' *'}</label>
-                {campo.type === 'textarea' ? (
-                  <textarea
-                    className="input-field min-h-[80px]"
-                    placeholder={campo.label}
-                    value={form[campo.name] ?? ''}
-                    onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
-                  />
-                ) : (
-                  <input
-                    type={campo.type}
-                    step={campo.step}
-                    required={campo.required}
-                    className="input-field"
-                    placeholder={campo.label}
-                    value={form[campo.name] ?? ''}
-                    onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
-                  />
-                )}
-              </div>
-            ))}
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
-            <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
-            <button type="submit" className="btn-primary">
-              {editingId ? 'Salva Modifiche' : 'Crea'}
-            </button>
-          </div>
-        </form>
+        {currentSection?.isClienteCustom ? (
+          <ClienteForm
+            form={form}
+            setForm={setForm}
+            editingId={editingId}
+            onSubmit={handleSubmit}
+            onCancel={() => setShowModal(false)}
+          />
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className={currentSection?.isAnagrafica ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-4'}>
+              {currentSection?.campi.map(campo => (
+                <div key={campo.name} className={campo.type === 'textarea' ? 'sm:col-span-2' : ''}>
+                  <label className="label">{campo.label}{campo.required && ' *'}</label>
+                  {campo.type === 'textarea' ? (
+                    <textarea
+                      className="input-field min-h-[80px]"
+                      placeholder={campo.label}
+                      value={form[campo.name] ?? ''}
+                      onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
+                    />
+                  ) : (
+                    <input
+                      type={campo.type}
+                      step={campo.step}
+                      required={campo.required}
+                      className="input-field"
+                      placeholder={campo.label}
+                      value={form[campo.name] ?? ''}
+                      onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
+              <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
+              <button type="submit" className="btn-primary">
+                {editingId ? 'Salva Modifiche' : 'Crea'}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
+  );
+}
+
+// ─── Componente ClienteForm con select gerarchici ──────────────────────────
+
+function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
+  const [paesi, setPaesi] = React.useState([]);
+  const [regioni, setRegioni] = React.useState([]);
+  const [province, setProvince] = React.useState([]);
+  const [citta, setCitta] = React.useState([]);
+  const [loadingGeo, setLoadingGeo] = React.useState(true);
+
+  // Carica paesi all'apertura
+  React.useEffect(() => {
+    geografia.paesi().then(setPaesi).catch(() => {
+      toast.error('Errore caricamento paesi');
+    }).finally(() => setLoadingGeo(false));
+  }, []);
+
+  // Cascata: quando cambia paese -> ricarica regioni
+  React.useEffect(() => {
+    if (!form.paese) {
+      setRegioni([]);
+      return;
+    }
+    geografia.regioni(form.paese).then(setRegioni).catch(() => setRegioni([]));
+  }, [form.paese]);
+
+  // Cascata: quando cambia regione -> ricarica province
+  React.useEffect(() => {
+    if (!form.regione) {
+      setProvince([]);
+      return;
+    }
+    geografia.province(form.regione).then(setProvince).catch(() => setProvince([]));
+  }, [form.regione]);
+
+  // Cascata: quando cambia provincia -> ricarica città
+  React.useEffect(() => {
+    if (!form.provincia) {
+      setCitta([]);
+      return;
+    }
+    geografia.citta(form.provincia).then(setCitta).catch(() => setCitta([]));
+  }, [form.provincia]);
+
+  // CAP disponibili per la città selezionata
+  const cittaSelezionata = citta.find(c => c.id === Number(form.citta));
+  const capDisponibili = cittaSelezionata?.cap_list || [];
+
+  // Handler per cascata: quando si cambia un livello superiore, resetta i sotto-livelli
+  const onChangePaese = (v) => {
+    setForm({ ...form, paese: v, regione: '', provincia: '', citta: '', cap: '' });
+  };
+  const onChangeRegione = (v) => {
+    setForm({ ...form, regione: v, provincia: '', citta: '', cap: '' });
+  };
+  const onChangeProvincia = (v) => {
+    setForm({ ...form, provincia: v, citta: '', cap: '' });
+  };
+  const onChangeCitta = (v) => {
+    const c = citta.find(x => x.id === Number(v));
+    const caps = c?.cap_list || [];
+    // Se c'è un solo CAP, preselezionalo
+    const capDefault = caps.length === 1 ? caps[0] : '';
+    setForm({ ...form, citta: v, cap: capDefault });
+  };
+
+  return (
+    <form onSubmit={onSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="label">Azienda</label>
+          <input type="text" className="input-field" placeholder="Azienda"
+            value={form.azienda ?? ''}
+            onChange={e => setForm({ ...form, azienda: e.target.value })} />
+        </div>
+        <div>
+          <label className="label">Nome / Referente *</label>
+          <input type="text" required className="input-field" placeholder="Nome"
+            value={form.nome ?? ''}
+            onChange={e => setForm({ ...form, nome: e.target.value })} />
+        </div>
+      </div>
+
+      {/* ── Indirizzo strutturato ── */}
+      <div className="bg-bark-50/50 p-4 rounded-lg space-y-3 border border-bark-100">
+        <p className="text-xs font-bold uppercase tracking-wider text-bark-500">Indirizzo</p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Paese</label>
+            <select className="select-field" value={form.paese ?? ''}
+              onChange={e => onChangePaese(e.target.value)}
+              disabled={loadingGeo}>
+              <option value="">— Seleziona paese —</option>
+              {paesi.map(p => (
+                <option key={p.id} value={p.id}>{p.nome}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">Regione</label>
+            <select className="select-field" value={form.regione ?? ''}
+              onChange={e => onChangeRegione(e.target.value)}
+              disabled={!form.paese || regioni.length === 0}>
+              <option value="">— Seleziona regione —</option>
+              {regioni.map(r => (
+                <option key={r.id} value={r.id}>{r.nome}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">Provincia</label>
+            <select className="select-field" value={form.provincia ?? ''}
+              onChange={e => onChangeProvincia(e.target.value)}
+              disabled={!form.regione || province.length === 0}>
+              <option value="">— Seleziona provincia —</option>
+              {province.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.nome}{p.sigla ? ` (${p.sigla})` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">Città</label>
+            <select className="select-field" value={form.citta ?? ''}
+              onChange={e => onChangeCitta(e.target.value)}
+              disabled={!form.provincia || citta.length === 0}>
+              <option value="">— Seleziona città —</option>
+              {citta.map(c => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="label">CAP</label>
+            {capDisponibili.length > 1 ? (
+              <select className="select-field" value={form.cap ?? ''}
+                onChange={e => setForm({ ...form, cap: e.target.value })}>
+                <option value="">— Seleziona CAP —</option>
+                {capDisponibili.map(cap => (
+                  <option key={cap} value={cap}>{cap}</option>
+                ))}
+              </select>
+            ) : (
+              <input type="text" className="input-field"
+                placeholder={capDisponibili[0] || 'CAP'}
+                value={form.cap ?? ''}
+                onChange={e => setForm({ ...form, cap: e.target.value })} />
+            )}
+          </div>
+
+          <div>
+            <label className="label">Via, numero civico</label>
+            <input type="text" className="input-field" placeholder="Via Roma, 12"
+              value={form.via ?? ''}
+              onChange={e => setForm({ ...form, via: e.target.value })} />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className="label">Partita IVA</label>
+          <input type="text" className="input-field" placeholder="Partita IVA"
+            value={form.partita_iva ?? ''}
+            onChange={e => setForm({ ...form, partita_iva: e.target.value })} />
+        </div>
+        <div>
+          <label className="label">Telefono</label>
+          <input type="tel" className="input-field" placeholder="Telefono"
+            value={form.telefono ?? ''}
+            onChange={e => setForm({ ...form, telefono: e.target.value })} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label">Email</label>
+          <input type="email" className="input-field" placeholder="Email"
+            value={form.email ?? ''}
+            onChange={e => setForm({ ...form, email: e.target.value })} />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label">Note</label>
+          <textarea className="input-field min-h-[80px]" placeholder="Note"
+            value={form.note ?? ''}
+            onChange={e => setForm({ ...form, note: e.target.value })} />
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
+        <button type="button" onClick={onCancel} className="btn-secondary">Annulla</button>
+        <button type="submit" className="btn-primary">
+          {editingId ? 'Salva Modifiche' : 'Crea'}
+        </button>
+      </div>
+    </form>
   );
 }
 
