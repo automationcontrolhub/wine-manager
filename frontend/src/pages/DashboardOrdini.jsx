@@ -37,6 +37,38 @@ const COLORS = {
   amber: '#d97706', amberLight: '#f59e0b',
 };
 
+/* Tronca un nome lungo aggiungendo ellipsis */
+const truncate = (s, max = 22) => {
+  if (!s) return '';
+  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
+};
+
+/* Tronca un nome ma più aggressivamente (per assi piccoli) */
+const truncateShort = (s, max = 18) => truncate(s, max);
+
+/* Custom label per Pie chart: posiziona dentro la fetta se grande,
+   fuori con linea se piccola. Riduce il rischio di tagli sui bordi. */
+function PieLabelLine({ cx, cy, midAngle, innerRadius, outerRadius, percent, name, value, showValue = false }) {
+  if (percent < 0.04) return null; // fette minuscole: nascondi label
+  const RADIAN = Math.PI / 180;
+  // Posizione DENTRO la fetta
+  const radius = innerRadius + (outerRadius - innerRadius) * 0.5;
+  const x = cx + radius * Math.cos(-midAngle * RADIAN);
+  const y = cy + radius * Math.sin(-midAngle * RADIAN);
+  const pct = (percent * 100).toFixed(0);
+  return (
+    <text
+      x={x} y={y}
+      fill="#fff"
+      textAnchor="middle"
+      dominantBaseline="central"
+      style={{ fontSize: 13, fontWeight: 700 }}
+    >
+      {pct}%
+    </text>
+  );
+}
+
 /* ─── Filtri globali ─────────────────────────────────────────────────── */
 
 const PERIODI = [
@@ -440,12 +472,17 @@ function TabCommerciale({ filtri }) {
           {trend_anno && trend_anno.length > 0 ? (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trend_anno}>
+                <BarChart data={trend_anno} margin={{ top: 10, right: 20, left: 10, bottom: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#eee9dc" />
-                  <XAxis dataKey="label" tick={{ fontSize: 12, fill: '#583f31' }} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 12, fill: '#583f31' }}
+                    interval={0}
+                  />
                   <YAxis
                     tick={{ fontSize: 12, fill: '#583f31' }}
                     tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
+                    width={60}
                   />
                   <Tooltip
                     formatter={(v) => fmtEUR(v)}
@@ -463,18 +500,31 @@ function TabCommerciale({ filtri }) {
           {periodo.n_ordini > 0 ? (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
                   <Pie
-                    data={pieData} cx="50%" cy="50%"
-                    outerRadius={80} innerRadius={45}
+                    data={pieData} cx="50%" cy="45%"
+                    outerRadius={70} innerRadius={40}
                     dataKey="value"
-                    label={({ name, value }) => `${name}: ${value}`}
+                    labelLine={false}
+                    label={PieLabelLine}
                   >
                     <Cell fill={COLORS.olive} />
                     <Cell fill={COLORS.amberLight} />
                   </Pie>
-                  <Tooltip />
-                  <Legend />
+                  <Tooltip
+                    formatter={(v, name) => [`${v} ordini`, name]}
+                    contentStyle={{ borderRadius: 8, border: '1px solid #ded3bb' }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    iconType="circle"
+                    formatter={(value, entry) => (
+                      <span style={{ color: '#583f31', fontSize: 13 }}>
+                        {value}: <strong>{entry.payload.value}</strong>
+                      </span>
+                    )}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -552,7 +602,11 @@ function TabClienti({ filtri }) {
           <h3 className="section-title">Top 10 clienti per fatturato</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topClienti} layout="vertical" margin={{ left: 60 }}>
+              <BarChart
+                data={topClienti.map(c => ({ ...c, name: truncate(c.name, 26) }))}
+                layout="vertical"
+                margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee9dc" />
                 <XAxis
                   type="number"
@@ -560,8 +614,9 @@ function TabClienti({ filtri }) {
                   tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
                 />
                 <YAxis
-                  type="category" dataKey="name" width={130}
+                  type="category" dataKey="name" width={180}
                   tick={{ fontSize: 12, fill: '#583f31' }}
+                  interval={0}
                 />
                 <Tooltip
                   formatter={(v) => fmtEUR(v)}
@@ -712,7 +767,11 @@ function TabAgenti({ filtri }) {
           <h3 className="section-title">Classifica fatturato — Top 10</h3>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={top} layout="vertical" margin={{ left: 30 }}>
+              <BarChart
+                data={top.map(t => ({ ...t, name: truncate(t.name, 24) }))}
+                layout="vertical"
+                margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+              >
                 <CartesianGrid strokeDasharray="3 3" stroke="#eee9dc" />
                 <XAxis
                   type="number"
@@ -720,8 +779,9 @@ function TabAgenti({ filtri }) {
                   tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
                 />
                 <YAxis
-                  type="category" dataKey="name" width={140}
+                  type="category" dataKey="name" width={170}
                   tick={{ fontSize: 12, fill: '#583f31' }}
+                  interval={0}
                 />
                 <Tooltip
                   formatter={(v) => fmtEUR(v)}
@@ -843,7 +903,11 @@ function TabProdotti({ filtri, etichettato, setEtichettato }) {
             <h3 className="section-title">Top 10 prodotti per fatturato</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={topProdotti} layout="vertical" margin={{ left: 30 }}>
+                <BarChart
+                  data={topProdotti.map(p => ({ ...p, name: truncate(p.name, 22) }))}
+                  layout="vertical"
+                  margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#eee9dc" />
                   <XAxis
                     type="number"
@@ -851,8 +915,9 @@ function TabProdotti({ filtri, etichettato, setEtichettato }) {
                     tickFormatter={(v) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : v}
                   />
                   <YAxis
-                    type="category" dataKey="name" width={140}
+                    type="category" dataKey="name" width={170}
                     tick={{ fontSize: 11, fill: '#583f31' }}
+                    interval={0}
                   />
                   <Tooltip
                     formatter={(v) => fmtEUR(v)}
@@ -870,14 +935,13 @@ function TabProdotti({ filtri, etichettato, setEtichettato }) {
             <h3 className="section-title">Fatturato per famiglia</h3>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
                   <Pie
-                    data={data.famiglie} cx="50%" cy="50%"
-                    outerRadius={100} innerRadius={50}
+                    data={data.famiglie} cx="50%" cy="45%"
+                    outerRadius={85} innerRadius={45}
                     dataKey="fatturato" nameKey="famiglia"
-                    label={({ famiglia, percent }) =>
-                      `${famiglia}: ${(percent * 100).toFixed(0)}%`
-                    }
+                    labelLine={false}
+                    label={PieLabelLine}
                   >
                     {data.famiglie.map((_, i) => {
                       const palette = [
@@ -887,7 +951,21 @@ function TabProdotti({ filtri, etichettato, setEtichettato }) {
                       return <Cell key={i} fill={palette[i % palette.length]} />;
                     })}
                   </Pie>
-                  <Tooltip formatter={(v) => fmtEUR(v)} />
+                  <Tooltip
+                    formatter={(v) => fmtEUR(v)}
+                    contentStyle={{ borderRadius: 8, border: '1px solid #ded3bb' }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={50}
+                    iconType="circle"
+                    wrapperStyle={{ fontSize: 12 }}
+                    formatter={(value) => (
+                      <span style={{ color: '#583f31', fontSize: 12 }}>
+                        {truncate(value, 20)}
+                      </span>
+                    )}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -977,17 +1055,31 @@ function TabPagamenti({ filtri }) {
           {totale > 0 ? (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
+                <PieChart margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
                   <Pie
-                    data={pieData} cx="50%" cy="50%"
-                    outerRadius={80} innerRadius={45}
+                    data={pieData} cx="50%" cy="45%"
+                    outerRadius={70} innerRadius={40}
                     dataKey="value"
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                    labelLine={false}
+                    label={PieLabelLine}
                   >
                     <Cell fill={COLORS.olive} />
                     <Cell fill={COLORS.amberLight} />
                   </Pie>
-                  <Tooltip formatter={(v) => fmtEUR(v)} />
+                  <Tooltip
+                    formatter={(v) => fmtEUR(v)}
+                    contentStyle={{ borderRadius: 8, border: '1px solid #ded3bb' }}
+                  />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    iconType="circle"
+                    formatter={(value, entry) => (
+                      <span style={{ color: '#583f31', fontSize: 13 }}>
+                        {value}: <strong>{fmtEUR(entry.payload.value)}</strong>
+                      </span>
+                    )}
+                  />
                 </PieChart>
               </ResponsiveContainer>
             </div>
