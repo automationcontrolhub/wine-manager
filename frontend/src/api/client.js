@@ -105,4 +105,15 @@ export const ordini = {
   ripristina: (id) => api.post(`/ordini/${id}/ripristina/`).then(r => r.data),
 };
 
+// ─── Dashboard Ordini ────────────────────────────────────────────────────
+
+export const dashboardOrdini = {
+  filtri:      ()       => api.get('/dashboard-ordini/filtri/').then(r => r.data),
+  commerciale: (params) => api.get('/dashboard-ordini/commerciale/', { params }).then(r => r.data),
+  clienti:     (params) => api.get('/dashboard-ordini/clienti/',     { params }).then(r => r.data),
+  agenti:      (params) => api.get('/dashboard-ordini/agenti/',      { params }).then(r => r.data),
+  prodotti:    (params) => api.get('/dashboard-ordini/prodotti/',    { params }).then(r => r.data),
+  pagamenti:   (params) => api.get('/dashboard-ordini/pagamenti/',   { params }).then(r => r.data),
+};
+
 export default api;

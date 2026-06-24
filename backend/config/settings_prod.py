@@ -14,11 +14,8 @@ SECRET_KEY = os.environ['SECRET_KEY']           # obbligatorio in prod
 ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost').split(',')
 
 # Protegge da attacchi CSRF anche cross-origin
-CSRF_TRUSTED_ORIGINS = [
-    h if h.startswith('http') else f'https://{h}'
-    for h in ALLOWED_HOSTS
-    if h not in ('localhost', '127.0.0.1', '*')
-]
+_csrf_raw = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_raw.split(',') if o.strip()]
 
 # ─── Database ─────────────────────────────────────────────────────────────
 DATABASES = {
@@ -62,11 +59,8 @@ USE_X_FORWARDED_HOST = True
 # In produzione non usiamo CORS_ALLOW_ALL_ORIGINS.
 # Il frontend viene servito dallo stesso dominio via Nginx.
 CORS_ALLOW_ALL_ORIGINS = False
-CORS_ALLOWED_ORIGINS = [
-    h if h.startswith('http') else f'https://{h}'
-    for h in ALLOWED_HOSTS
-    if h not in ('localhost', '127.0.0.1', '*')
-]
+_cors_raw = os.environ.get('CSRF_TRUSTED_ORIGINS', '')
+CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_raw.split(',') if o.strip()]
 
 # ─── Logging ─────────────────────────────────────────────────────────────
 LOGGING = {

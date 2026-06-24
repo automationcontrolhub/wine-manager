@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from . import views
+from . import dashboard_ordini as dord
 
 router = DefaultRouter()
 router.register(r'tipo-cartone', views.TipoCartoneViewSet)
@@ -36,5 +37,13 @@ urlpatterns = [
     path('bottiglie-senza-etichetta/', views.bottiglie_senza_etichetta),
     path('bottiglie-disponibili/', views.bottiglie_disponibili),
     path('operazioni/<int:pk>/annulla/', views.annulla_operazione),
+
+    # ─── Dashboard Ordini ─────────────────────────────────────────────
+    path('dashboard-ordini/filtri/', dord.dashboard_ordini_filtri),
+    path('dashboard-ordini/commerciale/', dord.dashboard_ordini_commerciale),
+    path('dashboard-ordini/clienti/', dord.dashboard_ordini_clienti),
+    path('dashboard-ordini/agenti/', dord.dashboard_ordini_agenti),
+    path('dashboard-ordini/prodotti/', dord.dashboard_ordini_prodotti),
+    path('dashboard-ordini/pagamenti/', dord.dashboard_ordini_pagamenti),
 ]
 
