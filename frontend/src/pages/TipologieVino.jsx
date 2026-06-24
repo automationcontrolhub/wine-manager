@@ -10,7 +10,14 @@ import {
   tipoEtichetta, tipoCapsula, tipoCestello,
 } from '../api/client';
 
-export default function TipologieVino() {
+/**
+ * Componente riutilizzabile per gestire Famiglie e Tipologie Vino.
+ *
+ * Prop:
+ *   - embedded (bool): se true, NON mostra il titolo della pagina (utile quando
+ *     è renderizzato dentro una tab di Configurazione).
+ */
+export function TipologieVinoContent({ embedded = false }) {
   const confirm = useConfirm();
   const [tipologie, setTipologie] = useState([]);
   const [famiglieList, setFamiglieList] = useState([]);
@@ -198,12 +205,27 @@ export default function TipologieVino() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="page-title">Tipologie Vino</h1>
-          <p className="text-bark-500">Gestisci le tipologie di vino e i materiali associati</p>
+      {/* Header — visibile solo se NON è embedded */}
+      {!embedded && (
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="page-title">Tipologie Vino</h1>
+            <p className="text-bark-500">Gestisci le tipologie di vino e i materiali associati</p>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={openCreateFamiglia} className="btn-secondary flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Nuova Famiglia
+            </button>
+            <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Nuova Tipologia
+            </button>
+          </div>
         </div>
-        <div className="flex gap-3">
+      )}
+
+      {/* In modalità embedded, mettiamo i pulsanti in alto alla card */}
+      {embedded && (
+        <div className="flex justify-end gap-3">
           <button onClick={openCreateFamiglia} className="btn-secondary flex items-center gap-2">
             <Plus className="w-4 h-4" /> Nuova Famiglia
           </button>
@@ -211,7 +233,7 @@ export default function TipologieVino() {
             <Plus className="w-4 h-4" /> Nuova Tipologia
           </button>
         </div>
-      </div>
+      )}
 
       <div className="card">
         <h2 className="section-title">Famiglie</h2>
@@ -441,4 +463,9 @@ export default function TipologieVino() {
       </Modal>
     </div>
   );
+}
+
+// Export di default: usato come pagina stand-alone (compatibilità retro)
+export default function TipologieVino() {
+  return <TipologieVinoContent embedded={false} />;
 }

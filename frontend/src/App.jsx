@@ -2,12 +2,11 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import {
-  LayoutDashboard, Wine, Warehouse, Package, Settings, GlassWater,
+  LayoutDashboard, Warehouse, Package, Settings, GlassWater,
   ChevronLeft, ChevronRight, ShoppingCart, BarChart3,
 } from 'lucide-react';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import Dashboard from './pages/Dashboard';
-import TipologieVino from './pages/TipologieVino';
 import Magazzino from './pages/Magazzino';
 import Imbottigliamento from './pages/Imbottigliamento';
 import Ordini from './pages/Ordini';
@@ -16,7 +15,6 @@ import Configurazione from './pages/Configurazione';
 
 const navItems = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Dashboard Magazzino' },
-  { to: '/tipologie', icon: Wine, label: 'Tipologie Vino' },
   { to: '/magazzino', icon: Warehouse, label: 'Magazzino' },
   { to: '/imbottigliamento', icon: Package, label: 'Imbottigliamento' },
   { to: '/ordini', icon: ShoppingCart, label: 'Ordini' },
@@ -97,7 +95,8 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/tipologie" element={<TipologieVino />} />
+                {/* Compatibilità retroattiva: vecchi link a /tipologie redirezionano a Configurazione */}
+                <Route path="/tipologie" element={<Navigate to="/configurazione" replace />} />
                 <Route path="/magazzino" element={<Magazzino />} />
                 <Route path="/imbottigliamento" element={<Imbottigliamento />} />
                 <Route path="/ordini" element={<Ordini />} />

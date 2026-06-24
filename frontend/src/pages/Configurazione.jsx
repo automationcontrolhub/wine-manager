@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import toast from 'react-hot-toast';
 import {
   Plus, Trash2, Settings, Package, Hexagon, Circle, Tag, ShieldCheck,
-  Grape, Edit3, Gift, Users, UserCog,
+  Grape, Edit3, Gift, Users, UserCog, Wine,
 } from 'lucide-react';
 import Modal from '../components/Modal';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -11,6 +11,7 @@ import {
   tipoEtichetta, tipoCapsula, tipoCestello, tipoGadget,
   clienti, agenti, geografia,
 } from '../api/client';
+import { TipologieVinoContent } from './TipologieVino';
 
 const SEZIONI = [
   {
@@ -61,10 +62,14 @@ const SEZIONI = [
     colonne: ['nome', 'quantita'],
     colonneLabel: ['Nome', 'Scorta'],
   },
+  // ── Vini (tab speciale: renderizza TipologieVinoContent) ─────────────
+  {
+    key: 'vino', label: 'Vini', icon: Wine, isVino: true,
+  },
   // ── Anagrafiche ──────────────────────────────────────────────────────
   {
     key: 'cliente', label: 'Clienti', icon: Users, api: clienti, isAnagrafica: true,
-    isClienteCustom: true,  // usa form custom con geografia
+    isClienteCustom: true,
     campi: [],
     colonne: ['azienda', 'nome', 'citta_nome', 'provincia_sigla', 'partita_iva', 'telefono'],
     colonneLabel: ['Azienda', 'Nome', 'Città', 'Prov.', 'P. IVA', 'Telefono'],
@@ -94,11 +99,14 @@ export default function Configurazione() {
   const [form, setForm] = useState({});
   const [editingId, setEditingId] = useState(null);
 
+  // Carica solo le sezioni che hanno un'api (cioè non 'vino')
+  const sezioniDati = SEZIONI.filter(s => s.api);
+
   const loadAll = async () => {
     setLoading(true);
-    const responses = await Promise.all(SEZIONI.map(sez => sez.api.list().catch(() => [])));
+    const responses = await Promise.all(sezioniDati.map(sez => sez.api.list().catch(() => [])));
     const results = {};
-    SEZIONI.forEach((sez, i) => {
+    sezioniDati.forEach((sez, i) => {
       const res = responses[i];
       results[sez.key] = Array.isArray(res) ? res : (res.results || []);
     });
@@ -198,8 +206,9 @@ export default function Configurazione() {
 
   const items = data[activeTab] || [];
 
-  // Raggruppamento tab per le due sezioni
-  const tabsMateriali = SEZIONI.filter(s => !s.isAnagrafica);
+  // Raggruppamento tab in 3 categorie
+  const tabsMateriali = SEZIONI.filter(s => !s.isAnagrafica && !s.isVino);
+  const tabsVino = SEZIONI.filter(s => s.isVino);
   const tabsAnagrafica = SEZIONI.filter(s => s.isAnagrafica);
 
   return (
@@ -209,7 +218,7 @@ export default function Configurazione() {
           <Settings className="w-8 h-8 text-bark-400" />
           Configurazione
         </h1>
-        <p className="text-bark-500">Gestisci tipologie di materiali, clienti e agenti</p>
+        <p className="text-bark-500">Gestisci tipologie di materiali, vini, clienti e agenti</p>
       </div>
 
       {/* Tabs materiali */}
@@ -219,6 +228,17 @@ export default function Configurazione() {
           {tabsMateriali.map(sez => (
             <TabButton key={sez.key} sez={sez} active={activeTab === sez.key}
               count={(data[sez.key] || []).length}
+              onClick={() => setActiveTab(sez.key)} />
+          ))}
+        </div>
+      </div>
+
+      {/* Tabs vino */}
+      <div>
+        <p className="text-xs font-bold uppercase tracking-wider text-bark-500 mb-2">Vino</p>
+        <div className="flex gap-1 bg-bark-100 rounded-xl p-1 flex-wrap">
+          {tabsVino.map(sez => (
+            <TabButton key={sez.key} sez={sez} active={activeTab === sez.key}
               onClick={() => setActiveTab(sez.key)} />
           ))}
         </div>
@@ -237,131 +257,139 @@ export default function Configurazione() {
       </div>
 
       {/* Contenuto sezione attiva */}
-      <div className="card animate-fade-in">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="section-title mb-0 flex items-center gap-2">
-            {React.createElement(currentSection.icon, { className: 'w-5 h-5 text-wine-600' })}
-            {currentSection.label}
-          </h2>
-          <button onClick={openCreate} className="btn-primary flex items-center gap-2">
-            <Plus className="w-4 h-4" />
-            {currentSection.isAnagrafica ? `Nuovo ${labelSingolare(currentSection)}` : 'Aggiungi'}
-          </button>
+      {currentSection?.isVino ? (
+        <div className="animate-fade-in">
+          <TipologieVinoContent embedded={true} />
         </div>
-
-        {items.length === 0 ? (
-          <div className="text-center py-8">
-            {React.createElement(currentSection.icon, { className: 'w-12 h-12 text-bark-300 mx-auto mb-3' })}
-            <p className="text-bark-500">
-              {currentSection.isAnagrafica
-                ? `Nessun ${labelSingolare(currentSection)} configurato.`
-                : `Nessun tipo di ${currentSection.label.toLowerCase()} configurato.`}
-            </p>
-            <p className="text-bark-400 text-sm mt-1">
-              Clicca "{currentSection.isAnagrafica ? `Nuovo ${labelSingolare(currentSection)}` : 'Aggiungi'}" per crearne uno.
-            </p>
+      ) : (
+        <div className="card animate-fade-in">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="section-title mb-0 flex items-center gap-2">
+              {React.createElement(currentSection.icon, { className: 'w-5 h-5 text-wine-600' })}
+              {currentSection.label}
+            </h2>
+            <button onClick={openCreate} className="btn-primary flex items-center gap-2">
+              <Plus className="w-4 h-4" />
+              {currentSection.isAnagrafica ? `Nuovo ${labelSingolare(currentSection)}` : 'Aggiungi'}
+            </button>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-bark-100">
-                  {currentSection.colonneLabel.map((col, i) => (
-                    <th key={i} className="table-header">{col}</th>
-                  ))}
-                  <th className="table-header w-24">Azioni</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map(item => (
-                  <tr key={item.id} className="border-b border-bark-50 hover:bg-bark-50/50 transition-colors">
-                    {currentSection.colonne.map((col, i) => (
-                      <td key={i} className={`table-cell ${
-                        col === 'quantita' ? 'font-semibold' :
-                        (col === 'nome' || col === 'azienda' || col === 'cognome') ? 'font-semibold text-bark-900' : ''
-                      }`}>
-                        {col === 'quantita' ? (
-                          <span className={item[col] > 0 ? 'text-olive-700' : 'text-red-500'}>
-                            {item[col]?.toLocaleString('it-IT')}
-                          </span>
-                        ) : (
-                          item[col] || <span className="text-bark-300">—</span>
-                        )}
-                      </td>
+
+          {items.length === 0 ? (
+            <div className="text-center py-8">
+              {React.createElement(currentSection.icon, { className: 'w-12 h-12 text-bark-300 mx-auto mb-3' })}
+              <p className="text-bark-500">
+                {currentSection.isAnagrafica
+                  ? `Nessun ${labelSingolare(currentSection)} configurato.`
+                  : `Nessun tipo di ${currentSection.label.toLowerCase()} configurato.`}
+              </p>
+              <p className="text-bark-400 text-sm mt-1">
+                Clicca "{currentSection.isAnagrafica ? `Nuovo ${labelSingolare(currentSection)}` : 'Aggiungi'}" per crearne uno.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-bark-100">
+                    {currentSection.colonneLabel.map((col, i) => (
+                      <th key={i} className="table-header">{col}</th>
                     ))}
-                    <td className="table-cell">
-                      <div className="flex gap-1">
-                        <button onClick={() => openEdit(item)}
-                          className="p-1.5 rounded-lg hover:bg-wine-50 text-bark-400 hover:text-wine-600 transition-colors"
-                          title="Modifica">
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button onClick={() => handleDelete(item)}
-                          className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
-                          title="Elimina">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
+                    <th className="table-header w-24">Azioni</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                </thead>
+                <tbody>
+                  {items.map(item => (
+                    <tr key={item.id} className="border-b border-bark-50 hover:bg-bark-50/50 transition-colors">
+                      {currentSection.colonne.map((col, i) => (
+                        <td key={i} className={`table-cell ${
+                          col === 'quantita' ? 'font-semibold' :
+                          (col === 'nome' || col === 'azienda' || col === 'cognome') ? 'font-semibold text-bark-900' : ''
+                        }`}>
+                          {col === 'quantita' ? (
+                            <span className={item[col] > 0 ? 'text-olive-700' : 'text-red-500'}>
+                              {item[col]?.toLocaleString('it-IT')}
+                            </span>
+                          ) : (
+                            item[col] || <span className="text-bark-300">—</span>
+                          )}
+                        </td>
+                      ))}
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          <button onClick={() => openEdit(item)}
+                            className="p-1.5 rounded-lg hover:bg-wine-50 text-bark-400 hover:text-wine-600 transition-colors"
+                            title="Modifica">
+                            <Edit3 className="w-4 h-4" />
+                          </button>
+                          <button onClick={() => handleDelete(item)}
+                            className="p-1.5 rounded-lg hover:bg-red-50 text-bark-400 hover:text-red-500 transition-colors"
+                            title="Elimina">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
-      <Modal open={showModal} onClose={() => setShowModal(false)}
-        wide={currentSection?.isAnagrafica}
-        title={editingId
-          ? `Modifica ${labelSingolare(currentSection)}`
-          : currentSection?.isAnagrafica
-            ? `Nuovo ${labelSingolare(currentSection)}`
-            : `Nuovo tipo di ${labelSingolare(currentSection)}`}>
-        {currentSection?.isClienteCustom ? (
-          <ClienteForm
-            form={form}
-            setForm={setForm}
-            editingId={editingId}
-            onSubmit={handleSubmit}
-            onCancel={() => setShowModal(false)}
-          />
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className={currentSection?.isAnagrafica ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-4'}>
-              {currentSection?.campi.map(campo => (
-                <div key={campo.name} className={campo.type === 'textarea' ? 'sm:col-span-2' : ''}>
-                  <label className="label">{campo.label}{campo.required && ' *'}</label>
-                  {campo.type === 'textarea' ? (
-                    <textarea
-                      className="input-field min-h-[80px]"
-                      placeholder={campo.label}
-                      value={form[campo.name] ?? ''}
-                      onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
-                    />
-                  ) : (
-                    <input
-                      type={campo.type}
-                      step={campo.step}
-                      required={campo.required}
-                      className="input-field"
-                      placeholder={campo.label}
-                      value={form[campo.name] ?? ''}
-                      onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
-              <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
-              <button type="submit" className="btn-primary">
-                {editingId ? 'Salva Modifiche' : 'Crea'}
-              </button>
-            </div>
-          </form>
-        )}
-      </Modal>
+      {!currentSection?.isVino && (
+        <Modal open={showModal} onClose={() => setShowModal(false)}
+          wide={currentSection?.isAnagrafica}
+          title={editingId
+            ? `Modifica ${labelSingolare(currentSection)}`
+            : currentSection?.isAnagrafica
+              ? `Nuovo ${labelSingolare(currentSection)}`
+              : `Nuovo tipo di ${labelSingolare(currentSection)}`}>
+          {currentSection?.isClienteCustom ? (
+            <ClienteForm
+              form={form}
+              setForm={setForm}
+              editingId={editingId}
+              onSubmit={handleSubmit}
+              onCancel={() => setShowModal(false)}
+            />
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className={currentSection?.isAnagrafica ? 'grid grid-cols-1 sm:grid-cols-2 gap-4' : 'space-y-4'}>
+                {currentSection?.campi.map(campo => (
+                  <div key={campo.name} className={campo.type === 'textarea' ? 'sm:col-span-2' : ''}>
+                    <label className="label">{campo.label}{campo.required && ' *'}</label>
+                    {campo.type === 'textarea' ? (
+                      <textarea
+                        className="input-field min-h-[80px]"
+                        placeholder={campo.label}
+                        value={form[campo.name] ?? ''}
+                        onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
+                      />
+                    ) : (
+                      <input
+                        type={campo.type}
+                        step={campo.step}
+                        required={campo.required}
+                        className="input-field"
+                        placeholder={campo.label}
+                        value={form[campo.name] ?? ''}
+                        onChange={e => setForm({ ...form, [campo.name]: e.target.value })}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
+                <button type="button" onClick={() => setShowModal(false)} className="btn-secondary">Annulla</button>
+                <button type="submit" className="btn-primary">
+                  {editingId ? 'Salva Modifiche' : 'Crea'}
+                </button>
+              </div>
+            </form>
+          )}
+        </Modal>
+      )}
     </div>
   );
 }
@@ -375,14 +403,12 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
   const [citta, setCitta] = React.useState([]);
   const [loadingGeo, setLoadingGeo] = React.useState(true);
 
-  // Carica paesi all'apertura
   React.useEffect(() => {
     geografia.paesi().then(setPaesi).catch(() => {
       toast.error('Errore caricamento paesi');
     }).finally(() => setLoadingGeo(false));
   }, []);
 
-  // Cascata: quando cambia paese -> ricarica regioni
   React.useEffect(() => {
     if (!form.paese) {
       setRegioni([]);
@@ -391,7 +417,6 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
     geografia.regioni(form.paese).then(setRegioni).catch(() => setRegioni([]));
   }, [form.paese]);
 
-  // Cascata: quando cambia regione -> ricarica province
   React.useEffect(() => {
     if (!form.regione) {
       setProvince([]);
@@ -400,7 +425,6 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
     geografia.province(form.regione).then(setProvince).catch(() => setProvince([]));
   }, [form.regione]);
 
-  // Cascata: quando cambia provincia -> ricarica città
   React.useEffect(() => {
     if (!form.provincia) {
       setCitta([]);
@@ -409,11 +433,9 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
     geografia.citta(form.provincia).then(setCitta).catch(() => setCitta([]));
   }, [form.provincia]);
 
-  // CAP disponibili per la città selezionata
   const cittaSelezionata = citta.find(c => c.id === Number(form.citta));
   const capDisponibili = cittaSelezionata?.cap_list || [];
 
-  // Handler per cascata: quando si cambia un livello superiore, resetta i sotto-livelli
   const onChangePaese = (v) => {
     setForm({ ...form, paese: v, regione: '', provincia: '', citta: '', cap: '' });
   };
@@ -426,7 +448,6 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
   const onChangeCitta = (v) => {
     const c = citta.find(x => x.id === Number(v));
     const caps = c?.cap_list || [];
-    // Se c'è un solo CAP, preselezionalo
     const capDefault = caps.length === 1 ? caps[0] : '';
     setForm({ ...form, citta: v, cap: capDefault });
   };
@@ -448,7 +469,6 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
         </div>
       </div>
 
-      {/* ── Indirizzo strutturato ── */}
       <div className="bg-bark-50/50 p-4 rounded-lg space-y-3 border border-bark-100">
         <p className="text-xs font-bold uppercase tracking-wider text-bark-500">Indirizzo</p>
 
@@ -572,7 +592,6 @@ function ClienteForm({ form, setForm, editingId, onSubmit, onCancel }) {
 function labelSingolare(sez) {
   if (!sez) return '';
   if (sez.singolare) return sez.singolare;
-  // Default: rimuovo la "i" finale per i materiali (Cartoni → Cartone)
   return sez.label.toLowerCase().replace(/i$/, 'o').replace(/e$/, 'a');
 }
 
@@ -589,11 +608,13 @@ function TabButton({ sez, active, count, onClick }) {
     >
       <Icon className="w-4 h-4" />
       {sez.label}
-      <span className={`text-xs px-1.5 py-0.5 rounded-full ${
-        active ? 'bg-bark-100 text-bark-600' : 'bg-bark-200/50 text-bark-400'
-      }`}>
-        {count}
-      </span>
+      {count !== undefined && (
+        <span className={`text-xs px-1.5 py-0.5 rounded-full ${
+          active ? 'bg-bark-100 text-bark-600' : 'bg-bark-200/50 text-bark-400'
+        }`}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }
