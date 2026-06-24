@@ -141,7 +141,15 @@ class CreaBottiglieConEtichettaSerializer(serializers.Serializer):
 
 
 class AssociaEtichettaSerializer(serializers.Serializer):
-    """Associa etichetta a bottiglie senza etichetta esistenti."""
+    """
+    Associa etichetta a bottiglie senza etichetta esistenti.
+
+    L'utente sceglie esplicitamente da quale stock partire:
+    - 'CON':   parto da bottiglie già con capsula → applico solo l'etichetta
+    - 'SENZA': parto da bottiglie senza capsula  → applico etichetta + capsula
+
+    In entrambi i casi il lotto risultante è COMPLETO con capsula.
+    """
     tipologia_vino_origine_id = serializers.IntegerField(
         help_text="ID della tipologia di vino delle bottiglie senza etichetta da prendere"
     )
@@ -149,9 +157,10 @@ class AssociaEtichettaSerializer(serializers.Serializer):
         help_text="ID della tipologia di vino con cui etichettare (può essere diversa dall'origine)"
     )
     quantita = serializers.IntegerField(min_value=1)
-    con_capsula = serializers.BooleanField(
-        default=False,
-        help_text="Se True e la capsula non era stata inserita nello step precedente"
+    origine_capsula = serializers.ChoiceField(
+        choices=['CON', 'SENZA'],
+        help_text="CON = bottiglie già con capsula (applico solo etichetta). "
+                  "SENZA = bottiglie senza capsula (applico etichetta + capsula)."
     )
 
 

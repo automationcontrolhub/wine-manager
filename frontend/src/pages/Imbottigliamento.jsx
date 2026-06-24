@@ -82,7 +82,7 @@ export default function Imbottigliamento() {
     tipologia_vino_origine_id: '', 
     tipologia_vino_destinazione_id: '',
     quantita: '', 
-    con_capsula: false 
+    origine_capsula: '',  // 'CON' o 'SENZA' — scelta esplicita dello stock di partenza
   });
 
   const [submitting, setSubmitting] = useState(false);
@@ -164,11 +164,11 @@ export default function Imbottigliamento() {
         tipologia_vino_origine_id: Number(formAssocia.tipologia_vino_origine_id),
         tipologia_vino_destinazione_id: Number(formAssocia.tipologia_vino_destinazione_id),
         quantita: Number(formAssocia.quantita),
-        con_capsula: formAssocia.con_capsula,
+        origine_capsula: formAssocia.origine_capsula,
       });
       toast.success(`Etichetta associata a ${formAssocia.quantita} bottiglie`);
       setShowAssocia(false);
-      setFormAssocia({ tipologia_vino_origine_id: '', tipologia_vino_destinazione_id: '', quantita: '', con_capsula: false });
+      setFormAssocia({ tipologia_vino_origine_id: '', tipologia_vino_destinazione_id: '', quantita: '', origine_capsula: '' });
       loadAll();
     } catch (e) {
       const errors = e.response?.data?.errors;
@@ -557,7 +557,7 @@ export default function Imbottigliamento() {
           <div>
             <label className="label">Tipologia origine (bottiglie senza etichetta)</label>
             <select className="select-field" required value={formAssocia.tipologia_vino_origine_id}
-              onChange={e => setFormAssocia({...formAssocia, tipologia_vino_origine_id: e.target.value})}>
+              onChange={e => setFormAssocia({...formAssocia, tipologia_vino_origine_id: e.target.value, origine_capsula: '', quantita: ''})}>
               <option value="">Seleziona tipologia di partenza...</option>
               {/* Solo tipologie con bottiglie senza etichetta */}
               {[...new Set(senzaEtichetta.map(s => s.tipologia_vino__id))].map(tipId => {
@@ -574,37 +574,84 @@ export default function Imbottigliamento() {
             </select>
           </div>
 
-          {formAssocia.tipologia_vino_origine_id && (
-            <div className="bg-bark-50 rounded-lg p-3 text-sm space-y-2">
-              <div className="flex justify-between">
-                <span className="text-bark-600">Disponibili senza capsula:</span>
-                <span className="font-bold text-bark-900">
-                  {selectedAssociaTip
-                    .filter(s => !s.ha_capsula)
-                    .reduce((sum, s) => sum + s.totale, 0)
-                    .toLocaleString('it-IT')}
-                </span>
+          {/* Scelta esplicita dello stock di partenza */}
+          {formAssocia.tipologia_vino_origine_id && (() => {
+            const dispSenzaCapsula = selectedAssociaTip
+              .filter(s => !s.ha_capsula)
+              .reduce((sum, s) => sum + s.totale, 0);
+            const dispConCapsula = selectedAssociaTip
+              .filter(s => s.ha_capsula)
+              .reduce((sum, s) => sum + s.totale, 0);
+
+            return (
+              <div>
+                <label className="label">Da quali bottiglie partire</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Card: bottiglie CON capsula */}
+                  <label className={`cursor-pointer rounded-xl border-2 p-4 transition-all
+                    ${formAssocia.origine_capsula === 'CON'
+                      ? 'border-wine-600 bg-wine-50'
+                      : dispConCapsula === 0
+                        ? 'border-bark-100 bg-bark-50/50 opacity-50 cursor-not-allowed'
+                        : 'border-bark-200 hover:border-wine-300 bg-white'
+                    }`}>
+                    <input type="radio" name="origine_capsula" value="CON"
+                      className="sr-only"
+                      disabled={dispConCapsula === 0}
+                      checked={formAssocia.origine_capsula === 'CON'}
+                      onChange={e => setFormAssocia({...formAssocia, origine_capsula: e.target.value, quantita: ''})} />
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center
+                        ${formAssocia.origine_capsula === 'CON' ? 'border-wine-600' : 'border-bark-300'}`}>
+                        {formAssocia.origine_capsula === 'CON' && (
+                          <div className="w-2 h-2 rounded-full bg-wine-600" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-bark-900">Bottiglie già con capsula</p>
+                        <p className="text-xs text-bark-500 mt-0.5">Applica solo l'etichetta</p>
+                        <p className="mt-2 text-lg font-display font-bold text-wine-700">
+                          {dispConCapsula.toLocaleString('it-IT')}
+                        </p>
+                        <p className="text-xs text-bark-500">disponibili</p>
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Card: bottiglie SENZA capsula */}
+                  <label className={`cursor-pointer rounded-xl border-2 p-4 transition-all
+                    ${formAssocia.origine_capsula === 'SENZA'
+                      ? 'border-wine-600 bg-wine-50'
+                      : dispSenzaCapsula === 0
+                        ? 'border-bark-100 bg-bark-50/50 opacity-50 cursor-not-allowed'
+                        : 'border-bark-200 hover:border-wine-300 bg-white'
+                    }`}>
+                    <input type="radio" name="origine_capsula" value="SENZA"
+                      className="sr-only"
+                      disabled={dispSenzaCapsula === 0}
+                      checked={formAssocia.origine_capsula === 'SENZA'}
+                      onChange={e => setFormAssocia({...formAssocia, origine_capsula: e.target.value, quantita: ''})} />
+                    <div className="flex items-start gap-3">
+                      <div className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center
+                        ${formAssocia.origine_capsula === 'SENZA' ? 'border-wine-600' : 'border-bark-300'}`}>
+                        {formAssocia.origine_capsula === 'SENZA' && (
+                          <div className="w-2 h-2 rounded-full bg-wine-600" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <p className="font-semibold text-bark-900">Bottiglie senza capsula</p>
+                        <p className="text-xs text-bark-500 mt-0.5">Applica etichetta + capsula</p>
+                        <p className="mt-2 text-lg font-display font-bold text-wine-700">
+                          {dispSenzaCapsula.toLocaleString('it-IT')}
+                        </p>
+                        <p className="text-xs text-bark-500">disponibili</p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-bark-600">Disponibili con capsula:</span>
-                <span className="font-bold text-bark-900">
-                  {selectedAssociaTip
-                    .filter(s => s.ha_capsula)
-                    .reduce((sum, s) => sum + s.totale, 0)
-                    .toLocaleString('it-IT')}
-                </span>
-              </div>
-              <div className="flex justify-between border-t border-bark-200 pt-2">
-                <span className="text-bark-700 font-semibold">Totale disponibili:</span>
-                <span className="font-bold text-wine-700">{maxDisponibile.toLocaleString('it-IT')}</span>
-              </div>
-              {formAssocia.con_capsula && selectedAssociaTip.filter(s => !s.ha_capsula).reduce((sum, s) => sum + s.totale, 0) > 0 && (
-                <p className="text-xs text-olive-700 bg-olive-50 px-2 py-1 rounded">
-                  ℹ️ Con flag capsula attivo, verranno prese prima quelle senza capsula
-                </p>
-              )}
-            </div>
-          )}
+            );
+          })()}
 
           <div>
             <label className="label">Tipologia destinazione (etichetta da applicare)</label>
@@ -619,27 +666,56 @@ export default function Imbottigliamento() {
             </select>
           </div>
 
-          <div>
-            <label className="label">Quantità da etichettare</label>
-            <input type="number" min="1" max={maxDisponibile || undefined}
-              className="input-field" required
-              placeholder={`max ${maxDisponibile}`}
-              value={formAssocia.quantita}
-              onChange={e => setFormAssocia({...formAssocia, quantita: e.target.value})} />
-          </div>
+          {/* Quantità: disabilitata finché non hai scelto lo stock */}
+          {(() => {
+            const maxStock = formAssocia.origine_capsula === 'CON'
+              ? selectedAssociaTip.filter(s => s.ha_capsula).reduce((sum, s) => sum + s.totale, 0)
+              : formAssocia.origine_capsula === 'SENZA'
+                ? selectedAssociaTip.filter(s => !s.ha_capsula).reduce((sum, s) => sum + s.totale, 0)
+                : 0;
+            return (
+              <div>
+                <label className="label">Quantità da etichettare</label>
+                <input type="number" min="1" max={maxStock || undefined}
+                  className="input-field" required
+                  disabled={!formAssocia.origine_capsula}
+                  placeholder={formAssocia.origine_capsula ? `max ${maxStock}` : 'Seleziona prima lo stock di partenza'}
+                  value={formAssocia.quantita}
+                  onChange={e => setFormAssocia({...formAssocia, quantita: e.target.value})} />
+              </div>
+            );
+          })()}
 
-          <label className="flex items-center gap-3 cursor-pointer">
-            <input type="checkbox" className="w-5 h-5 rounded border-bark-300 text-wine-600 focus:ring-wine-500"
-              checked={formAssocia.con_capsula}
-              onChange={e => setFormAssocia({...formAssocia, con_capsula: e.target.checked})} />
-            <span className="text-sm text-bark-800 font-medium">
-              Applica capsula (se non già applicata nello step precedente)
-            </span>
-          </label>
+          {/* Riepilogo materiali da scalare */}
+          {formAssocia.origine_capsula && formAssocia.tipologia_vino_destinazione_id && formAssocia.quantita && (() => {
+            const tipDest = tipologie.find(t => t.id === Number(formAssocia.tipologia_vino_destinazione_id));
+            const q = Number(formAssocia.quantita) || 0;
+            const capsuleNecessarie = formAssocia.origine_capsula === 'SENZA' ? q : 0;
+            return (
+              <div className="bg-bark-50 rounded-lg p-3 text-sm space-y-1.5">
+                <p className="font-semibold text-bark-700 text-xs uppercase tracking-wider">Riepilogo materiali da scalare</p>
+                <div className="flex justify-between">
+                  <span className="text-bark-600">Etichette ({tipDest?.tipo_etichetta_nome})</span>
+                  <span className="font-bold text-bark-900">{q.toLocaleString('it-IT')}</span>
+                </div>
+                {capsuleNecessarie > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-bark-600">Capsule ({tipDest?.tipo_capsula_nome})</span>
+                    <span className="font-bold text-bark-900">{capsuleNecessarie.toLocaleString('it-IT')}</span>
+                  </div>
+                )}
+                {capsuleNecessarie === 0 && (
+                  <p className="text-xs text-olive-700 bg-olive-50 px-2 py-1 rounded mt-1">
+                    ℹ️ Nessuna capsula scalata (le bottiglie ne hanno già una)
+                  </p>
+                )}
+              </div>
+            );
+          })()}
 
           <div className="flex justify-end gap-3 pt-4 border-t border-bark-100">
             <button type="button" onClick={() => setShowAssocia(false)} className="btn-secondary">Annulla</button>
-            <button type="submit" disabled={submitting} className="btn-success">
+            <button type="submit" disabled={submitting || !formAssocia.origine_capsula} className="btn-success">
               {submitting ? 'Associazione...' : 'Associa Etichetta'}
             </button>
           </div>

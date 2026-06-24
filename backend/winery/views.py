@@ -462,15 +462,20 @@ def crea_bottiglie_con_etichetta(request):
 @api_view(['POST'])
 def associa_etichetta(request):
     """
-    Prende N bottiglie SENZA_ETICHETTA di una tipologia ORIGINE,
-    scala la quantità dal lotto senza etichetta origine,
-    applica l'etichetta della tipologia DESTINAZIONE (può essere diversa!),
-    e aggiunge al lotto COMPLETA con tipologia destinazione.
-    Scala etichette della destinazione (e opzionalmente capsule se non c'erano).
+    Prende N bottiglie SENZA_ETICHETTA di una tipologia ORIGINE, partendo da
+    uno stock ESPLICITAMENTE scelto dall'utente (con/senza capsula), applica
+    l'etichetta della tipologia DESTINAZIONE (può essere diversa) e crea/aggrega
+    un lotto COMPLETA con tipologia destinazione.
 
-    LOGICA INTELLIGENTE PER CAPSULE:
-    - Se con_capsula=True → prendi PRIMA dai lotti SENZA capsula (aggiungi capsula)
-    - Se con_capsula=False → prendi PRIMA dai lotti CON capsula (non sprecare capsule)
+    LOGICA NUOVA (esplicita, niente più ambiguità sul flag con_capsula):
+      - origine_capsula = 'CON'   → prendi SOLO bottiglie già con capsula
+                                     scali SOLO etichette destinazione
+                                     lotto risultante: COMPLETA, ha_capsula=True
+      - origine_capsula = 'SENZA' → prendi SOLO bottiglie senza capsula
+                                     scali etichette + capsule destinazione
+                                     lotto risultante: COMPLETA, ha_capsula=True
+
+    In entrambi i casi il lotto finale ha capsula (è obbligatoria sulle bottiglie complete).
     """
     ser = AssociaEtichettaSerializer(data=request.data)
     ser.is_valid(raise_exception=True)
@@ -479,7 +484,9 @@ def associa_etichetta(request):
     orig_id = d['tipologia_vino_origine_id']
     dest_id = d['tipologia_vino_destinazione_id']
     quantita = d['quantita']
-    con_capsula = d['con_capsula']
+    origine_capsula = d['origine_capsula']  # 'CON' o 'SENZA'
+
+    parti_da_con_capsula = (origine_capsula == 'CON')
 
     with transaction.atomic():
         # Blocca le tipologie in ordine crescente di ID per prevenire deadlock
@@ -500,46 +507,28 @@ def associa_etichetta(request):
         tipologia_origine = locked[orig_id]
         tipologia_dest = locked[dest_id]
 
-        # Trova e blocca i lotti senza etichetta della ORIGINE, valutati UNA SOLA VOLTA
-        if con_capsula:
-            # Se vogliamo aggiungere capsula, prendiamo PRIMA quelle senza
-            lotti_senza = list(
-                LottoBottiglie.objects.select_for_update().filter(
-                    tipologia_vino=tipologia_origine,
-                    stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
-                    ha_etichetta=False,
-                ).order_by('ha_capsula', 'data_creazione')  # False prima (senza capsula)
-            )
-        else:
-            # Se NON vogliamo capsula, prendiamo PRIMA quelle che già ce l'hanno
-            lotti_senza = list(
-                LottoBottiglie.objects.select_for_update().filter(
-                    tipologia_vino=tipologia_origine,
-                    stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
-                    ha_etichetta=False,
-                ).order_by('-ha_capsula', 'data_creazione')  # True prima (con capsula)
-            )
+        # Cerco SOLO i lotti che corrispondono allo stock scelto dall'utente
+        lotti_senza = list(
+            LottoBottiglie.objects.select_for_update().filter(
+                tipologia_vino=tipologia_origine,
+                stato=LottoBottiglie.Stato.SENZA_ETICHETTA,
+                ha_etichetta=False,
+                ha_capsula=parti_da_con_capsula,
+            ).order_by('data_creazione')
+        )
 
         totale_disponibile = sum(l.quantita for l in lotti_senza)
         if totale_disponibile < quantita:
+            stock_label = "con capsula" if parti_da_con_capsula else "senza capsula"
             return Response({
                 'errors': [
-                    f"Bottiglie senza etichetta insufficienti per {tipologia_origine}: "
+                    f"Bottiglie {stock_label} insufficienti per {tipologia_origine}: "
                     f"servono {quantita}, disponibili {totale_disponibile}"
                 ]
             }, status=400)
 
-        # Conta quante capsule servono davvero (solo bottiglie SENZA capsula da convertire)
-        capsule_da_aggiungere = 0
-        if con_capsula:
-            rimanenti = quantita
-            for lotto in lotti_senza:
-                if rimanenti <= 0:
-                    break
-                da_prendere = min(rimanenti, lotto.quantita)
-                if not lotto.ha_capsula:
-                    capsule_da_aggiungere += da_prendere
-                rimanenti -= da_prendere
+        # Le capsule da aggiungere sono pari a quantita se parto da SENZA capsula, altrimenti 0
+        capsule_da_aggiungere = 0 if parti_da_con_capsula else quantita
 
         # Verifica disponibilità etichette e capsule della DESTINAZIONE
         errori = []
@@ -566,7 +555,7 @@ def associa_etichetta(request):
             descrizione=f"Etichette '{tipologia_dest.tipo_etichetta.nome}' associate a bottiglie (origine: {tipologia_origine}, dest: {tipologia_dest})",
         )
 
-        # Scala capsule della DESTINAZIONE se necessario
+        # Scala capsule della DESTINAZIONE se siamo partiti da bottiglie senza capsula
         if capsule_da_aggiungere > 0:
             tipologia_dest.tipo_capsula.quantita -= capsule_da_aggiungere
             tipologia_dest.tipo_capsula.save(update_fields=['quantita'])
@@ -574,10 +563,10 @@ def associa_etichetta(request):
                 tipo=MovimentoMagazzino.TipoMovimento.SCARICO,
                 categoria=MovimentoMagazzino.Categoria.CAPSULA,
                 quantita=capsule_da_aggiungere,
-                descrizione=f"Capsule '{tipologia_dest.tipo_capsula.nome}' associate (step etichetta)",
+                descrizione=f"Capsule '{tipologia_dest.tipo_capsula.nome}' applicate durante associa etichetta",
             )
 
-        # Scala dai lotti senza etichetta della ORIGINE (lista già valutata e bloccata)
+        # Scala dai lotti senza etichetta della ORIGINE (FIFO)
         rimanenti = quantita
         for lotto in lotti_senza:
             if rimanenti <= 0:
@@ -590,12 +579,12 @@ def associa_etichetta(request):
                 lotto.save(update_fields=['quantita', 'data_aggiornamento'])
             rimanenti -= da_prendere
 
-        # Aggiungi al lotto completo con tipologia DESTINAZIONE
+        # Il lotto risultante è SEMPRE con capsula (le bottiglie complete ne hanno una)
         lotto_completo = LottoBottiglie.objects.select_for_update().filter(
             tipologia_vino=tipologia_dest,
             stato=LottoBottiglie.Stato.COMPLETA,
             ha_etichetta=True,
-            ha_capsula=con_capsula,
+            ha_capsula=True,
         ).first()
 
         if lotto_completo:
@@ -607,7 +596,7 @@ def associa_etichetta(request):
                 quantita=quantita,
                 stato=LottoBottiglie.Stato.COMPLETA,
                 ha_etichetta=True,
-                ha_capsula=con_capsula,
+                ha_capsula=True,
             )
 
         # Salva snapshot operazione per annullamento
@@ -617,12 +606,16 @@ def associa_etichetta(request):
             tipologia_vino_destinazione=tipologia_dest,
             quantita=quantita,
             con_etichetta=True,
-            con_capsula=con_capsula,
+            # Salviamo il valore "logico": il lotto risultante ha sempre capsula.
+            # Il dato che serve per l'annullamento sta in `dettagli.origine_capsula`.
+            con_capsula=True,
             dettagli={
                 'lotto_dest_id': lotto_completo.id,
                 'capsule_aggiunte': capsule_da_aggiungere,
                 'tipologia_origine_id': tipologia_origine.id,
                 'tipologia_dest_id': tipologia_dest.id,
+                'origine_capsula': origine_capsula,  # 'CON' o 'SENZA'
+                'parti_da_con_capsula': parti_da_con_capsula,
             },
         )
 
@@ -858,23 +851,40 @@ def _annulla_crea_con_etichetta(op):
 
 def _annulla_associa_etichetta(op):
     """
-    Annulla associa etichetta: 
+    Annulla associa etichetta:
     - Rimette etichette (e capsule se aggiunte) in magazzino
     - Sottrae dal lotto destinazione
-    - Riporta le bottiglie come "senza etichetta" della tipologia origine
+    - Riporta le bottiglie come "senza etichetta" della tipologia origine,
+      con lo stato capsula corretto (quello che avevano PRIMA dell'operazione).
+
+    NUOVA LOGICA (operazioni create dopo il fix):
+      dettagli.origine_capsula = 'CON'   → ripristina come ha_capsula=True
+      dettagli.origine_capsula = 'SENZA' → ripristina come ha_capsula=False
+
+    RETROCOMPATIBILITÀ (operazioni vecchie con flag ambiguo con_capsula):
+      Se 'origine_capsula' non è nei dettagli, applica la vecchia euristica.
     """
     tipologia_origine = op.tipologia_vino
     tipologia_dest = op.tipologia_vino_destinazione
     quantita = op.quantita
-    con_capsula = op.con_capsula
     capsule_aggiunte = op.dettagli.get('capsule_aggiunte', 0)
+    origine_capsula = op.dettagli.get('origine_capsula')  # 'CON', 'SENZA' o None (operazione vecchia)
+
+    # Per le operazioni create con la nuova logica, il lotto destinazione ha SEMPRE capsula.
+    # Per le vecchie, usiamo il valore salvato in op.con_capsula.
+    if origine_capsula is not None:
+        # Nuova logica: il lotto completo creato aveva sempre ha_capsula=True
+        ha_capsula_lotto_dest = True
+    else:
+        # Vecchia logica
+        ha_capsula_lotto_dest = op.con_capsula
 
     # Verifica che ci siano abbastanza bottiglie nel lotto destinazione
     lotto_dest = LottoBottiglie.objects.filter(
         tipologia_vino=tipologia_dest,
         stato=LottoBottiglie.Stato.COMPLETA,
         ha_etichetta=True,
-        ha_capsula=con_capsula,
+        ha_capsula=ha_capsula_lotto_dest,
     ).first()
 
     disponibili = lotto_dest.quantita if lotto_dest else 0
@@ -913,32 +923,28 @@ def _annulla_associa_etichetta(op):
     else:
         lotto_dest.delete()
 
-    # Rimetti come bottiglie senza etichetta della ORIGINE
-    # Stato capsula: se nello step originale era stato attivato il flag, le bottiglie 
-    # ora hanno la capsula. Altrimenti seguono lo stato originale.
-    # Per semplicità, se capsule erano state aggiunte, mettiamo bottiglie con capsula
-    # nelle bottiglie senza etichetta. Per il resto, senza capsula.
-    bottiglie_con_capsula_da_ripristinare = quantita - capsule_aggiunte
-    bottiglie_senza_capsula_da_ripristinare = capsule_aggiunte if con_capsula else (quantita if not con_capsula else 0)
-    
-    # In realtà, per essere coerenti:
-    # - se con_capsula=True: alcune avevano capsula (quantita - capsule_aggiunte) altre no (capsule_aggiunte)
-    #   ma ora tutte hanno capsula, quindi rimetto tutte CON capsula? No, ripristino lo stato precedente.
-    #   capsule_aggiunte = quante NON avevano capsula prima
-    #   quindi: senza capsula = capsule_aggiunte, con capsula = quantita - capsule_aggiunte
-    # - se con_capsula=False: nessuna capsula aggiunta, quindi rimangono come prima
-    #   tutte avevano lo stato originale che però non sappiamo... assumiamo tutte CON (più probabile)
-    
-    if con_capsula:
-        senza_cap = capsule_aggiunte
-        con_cap = quantita - capsule_aggiunte
+    # Determina come ripristinare lo stato capsula delle bottiglie origine
+    if origine_capsula is not None:
+        # NUOVA LOGICA: lo stato è esplicito e univoco
+        if origine_capsula == 'CON':
+            senza_cap = 0
+            con_cap = quantita
+        else:  # 'SENZA'
+            senza_cap = quantita
+            con_cap = 0
     else:
-        # Caso "senza capsula" nel form: prendevamo prima quelle CON capsula
-        # quindi quelle ripristinate erano con capsula
-        senza_cap = 0
-        con_cap = quantita
+        # VECCHIA LOGICA (retrocompatibilità con operazioni pre-fix):
+        # capsule_aggiunte = quante bottiglie NON avevano capsula prima
+        # quindi: senza capsula = capsule_aggiunte, con capsula = il resto
+        if op.con_capsula:
+            senza_cap = capsule_aggiunte
+            con_cap = quantita - capsule_aggiunte
+        else:
+            # Vecchio caso "senza capsula": il sistema prendeva prima quelle CON
+            senza_cap = 0
+            con_cap = quantita
 
-    # Crea lotto senza etichetta CON capsula (se applicabile)
+    # Crea/aggrega lotto senza etichetta CON capsula (se applicabile)
     if con_cap > 0:
         lotto_con = LottoBottiglie.objects.filter(
             tipologia_vino=tipologia_origine,
@@ -958,7 +964,7 @@ def _annulla_associa_etichetta(op):
                 ha_capsula=True,
             )
 
-    # Crea lotto senza etichetta SENZA capsula (se applicabile)
+    # Crea/aggrega lotto senza etichetta SENZA capsula (se applicabile)
     if senza_cap > 0:
         lotto_sc = LottoBottiglie.objects.filter(
             tipologia_vino=tipologia_origine,
